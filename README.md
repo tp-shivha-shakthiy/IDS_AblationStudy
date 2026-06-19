@@ -29,9 +29,9 @@ INTRUSION-DETECTION-SYSTEM/
 │   ├── train_logistic.py                Logistic Regression (multinomial/saga)
 │   ├── train_dnn.py                     PyTorch DNN with weighted cross-entropy
 │   ├── train_LSTM.py                    Bi-LSTM + MI + PCA + KMeansSMOTE
-│   ├── train_Bi-LSTM.PY                 Weighted Bi-LSTM vs XGBoost dual pipeline
+│   ├── train_Bi-LSTM.py                  Weighted Bi-LSTM vs XGBoost dual pipeline
 │   ├── train_Bi-LSTM_shared-feature-extractor.py  Multi-task DNN (shared backbone, binary + multi-class heads)
-│   └── train_1D-CNN(MI+PCA+K-means).py  Standard DNN (misnamed; no convolutional layers)
+│   └── train_dnn_mi_pca_kmeans.py        4-layer DNN with MI, PCA, and KMeansSMOTE
 │
 ├── notebooks/
 │   └── Intrusion_Detection.ipynb        Exploratory notebook with full pipeline & results
@@ -123,11 +123,9 @@ The sklearn models (HGB, XGBoost, Logistic Regression) run through the shared pi
 |--------|-------------|---------------|-----------|
 | `train_dnn.py` | 3-layer DNN (64→32→n) with BatchNorm, Dropout | Log1p only | Weighted loss per fold |
 | `train_LSTM.py` | Bidirectional LSTM (hidden=32) | MI top-30 → PCA 15 | RandomUnderSampler + KMeansSMOTE |
-| `train_Bi-LSTM.PY` | Weighted Bi-LSTM + XGBoost dual pipeline | MI top-30 → PCA 15 | KMeansSMOTE |
+| `train_Bi-LSTM.py` | Weighted Bi-LSTM + XGBoost dual pipeline | MI top-30 → PCA 15 | KMeansSMOTE |
 | `train_Bi-LSTM_shared-feature-extractor.py` | Multi-task DNN: shared backbone (128→64), binary + multi-class heads, joint 40/60 loss | MI top-30 → PCA 15 | None |
-| `train_1D-CNN(MI+PCA+K-means).py` | 4-layer DNN (128→64→32→n) with BatchNorm, Dropout | MI top-30 → PCA 15 | RandomUnderSampler + KMeansSMOTE |
-
-> **Note:** All DL models use **PyTorch**. Despite its name, the "1D-CNN" script implements a standard feedforward DNN with no convolutional layers. `train_Bi-LSTM.PY` has an uppercase `.PY` extension (may require explicit invocation on Linux/macOS).
+| `train_dnn_mi_pca_kmeans.py` | 4-layer DNN (128→64→32→n) with BatchNorm, Dropout | MI top-30 → PCA 15 | RandomUnderSampler + KMeansSMOTE |
 
 ---
 
@@ -250,10 +248,4 @@ Generated outputs:
 
 The paper reports 99.95% binary F1 and 97.92% weighted F1 on UNSW-NB15 using SMOTE-ENN + DNN. This implementation matches the weighted F1 (0.9792, Bi-LSTM) and improves Macro F1 through the Weighted Bi-LSTM configuration (0.4932 vs unreported in paper), reflecting stronger minority class detection on rare attack types (Worms, Shellcode, Analysis). The multi-task hierarchical DNN with shared feature extractor is an architectural addition not present in the original paper.
 
----
 
-## Known Issues
-
-- `models/train_Bi-LSTM.PY` uses an uppercase `.PY` extension — won't auto-import on case-sensitive filesystems.
-- `models/train_1D-CNN(MI+PCA+K-means).py` is a standard feedforward DNN, not a 1D convolutional network (the name is inaccurate).
-- `requirements.txt` lists `tensorflow` but no scripts in this project use TensorFlow; all DL scripts use PyTorch.
