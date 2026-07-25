@@ -1,87 +1,199 @@
 """
 cross_validation.py
 ===================
-Generic cross-validation runner.
+Phase 6 -- Cross-Validation Training Helpers
 
-Takes a list of pre-built balanced folds (from balancing.py) and an
-sklearn-compatible estimator, runs training + validation on each fold,
-and returns a results DataFrame.
+Two levels of helpers:
 
-Used by train_hgb.py, train_xgboost.py, and train_logistic.py to avoid
-duplicated loop logic.
+  train_and_score_fold(model, X_tr, y_tr, X_val, y_val)
+      Train once on already-balanced fold data and return metrics.
+      Low-level building block used by train_*.py.
+
+  run_cv(X_train, y_train, model_class, model_params, ...)
+      Full per-fold pipeline:
+        MI fit on fold train → transform fold train + val
+        StandardScaler fit on fold train → transform fold train + val
+        PCA fit on fold train → transform fold train + val
+        K-means SMOTE on fold train only
+        train → eval
+
+      Returns mean metrics plus fitted selector/scaler/pca for retraining.
 """
 
 import numpy as np
-import pandas as pd
 import gc
-from sklearn.metrics import accuracy_score, f1_score
+import time
+import warnings
+from sklearn.model_selection import StratifiedKFold
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
+from sklearn.feature_selection import mutual_info_classif, SelectKBest
+from sklearn.metrics import (precision_score, recall_score, f1_score,
+                             accuracy_score, roc_auc_score)
+
+from src.balancing import balance_training_fold
 
 
-def run_cv(
-    model,
-    balanced_folds: list,
-    normal_class_idx: int,
-    model_name: str = "Model",
-) -> tuple:
+# ===================================================================
+# Low-level: train a single model on an already-balanced fold
+# ===================================================================
+
+def train_and_score_fold(model, X_tr, y_tr, X_val, y_val,
+                         use_sample_weight: bool = False):
     """
-    Train *model* on each fold, compute binary + multi-class metrics.
-
-    Parameters
-    ----------
-    model             : sklearn estimator (unfitted)
-    balanced_folds    : list of dicts from balancing.py
-    normal_class_idx  : int   index of the 'Normal' class in LabelEncoder
-    model_name        : str   label used in progress output
+    Fit *model* on (X_tr, y_tr) and score on (X_val, y_val).
 
     Returns
     -------
-    results_df  : pd.DataFrame   per-fold + mean metrics
-    trained_model : last fitted model (fold 5)
+    dict with keys: accuracy, precision, recall, f1, auc (if available)
     """
-    results_log = []
+    sample_weight = None
+    if use_sample_weight:
+        classes, counts = np.unique(y_tr, return_counts=True)
+        n_samples = len(y_tr)
+        n_classes = len(classes)
+        sample_weight = n_samples / (n_classes * counts)
+        sw_map = dict(zip(classes, sample_weight))
+        sample_weight = np.array([sw_map[c] for c in y_tr])
 
-    for fold_idx, fold_data in enumerate(balanced_folds):
-        print(f"\n  [{model_name}] Training fold {fold_idx + 1} / "
-              f"{len(balanced_folds)} ...")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        if sample_weight is not None:
+            model.fit(X_tr, y_tr, sample_weight=sample_weight)
+        else:
+            model.fit(X_tr, y_tr)
+        y_pred = model.predict(X_val)
 
-        X_tr  = fold_data['X_train_fold']
-        y_tr  = fold_data['y_train_fold']
-        X_val = fold_data['X_val_fold']
-        y_val = fold_data['y_val_fold']
+    acc = accuracy_score(y_val, y_pred)
+    prec = precision_score(y_val, y_pred, average='weighted', zero_division=0)
+    rec = recall_score(y_val, y_pred, average='weighted', zero_division=0)
+    f1 = f1_score(y_val, y_pred, average='weighted', zero_division=0)
 
-        model.fit(X_tr, y_tr)
-        y_pred_multi = model.predict(X_val)
+    auc = 0.0
+    try:
+        auc = roc_auc_score(y_val, model.predict_proba(X_val),
+                            multi_class='ovr', average='weighted')
+    except Exception:
+        pass
 
-        # Multi-class metrics
-        multi_acc   = accuracy_score(y_val, y_pred_multi)
-        macro_f1    = f1_score(y_val, y_pred_multi, average='macro',
-                                zero_division=0)
-        weighted_f1 = f1_score(y_val, y_pred_multi, average='weighted',
-                                zero_division=0)
+    return {'accuracy': acc, 'precision': prec, 'recall': rec,
+            'f1': f1, 'auc': auc}
 
-        # Binary metrics  (Normal=0, Attack=1)
-        y_val_bin  = np.where(y_val == normal_class_idx, 0, 1)
-        y_pred_bin = np.where(y_pred_multi == normal_class_idx, 0, 1)
-        binary_acc = accuracy_score(y_val_bin, y_pred_bin)
-        binary_f1  = f1_score(y_val_bin, y_pred_bin, average='binary',
-                               zero_division=0)
 
-        results_log.append({
-            'Fold':        f"Fold {fold_idx + 1}",
-            'Binary Acc':  binary_acc,
-            'Binary F1':   binary_f1,
-            'Multi-Acc':   multi_acc,
-            'Macro F1':    macro_f1,
-            'Weighted F1': weighted_f1,
-        })
+# ===================================================================
+# Full per-fold pipeline: MI → Scaler → PCA → K-means SMOTE → train
+# ===================================================================
 
-        print(f"    Multi-Acc: {multi_acc:.4f}  |  Binary F1: {binary_f1:.4f}")
-        del X_tr, y_tr, X_val, y_val; gc.collect()
+def run_cv(
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    model_class,
+    model_params: dict,
+    n_splits: int = 5,
+    mi_k: int = 15,
+    pca_variance: float = 0.95,
+    k_neighbors: int = 3,
+    random_state: int = 42,
+    use_sample_weight: bool = False,
+    strategy: str = "kmeans",
+    n_clusters: int = 20,
+):
+    """
+    Run Stratified K-Fold CV with per-fold leakage-free preprocessing.
 
-    # Append mean row
-    df = pd.DataFrame(results_log)
-    mean_row = df.mean(numeric_only=True).to_dict()
-    mean_row['Fold'] = 'Mean'
-    df = pd.concat([df, pd.DataFrame([mean_row])], ignore_index=True)
+    For each fold:
+      1. Fit MI selector on fold train → transform fold train + val
+      2. Fit StandardScaler on fold train → transform fold train + val
+      3. Fit PCA on scaled fold train → transform fold train + val
+      4. K-means SMOTE on fold train only
+      5. Train model → evaluate on val
 
-    return df, model   # returns the last fitted model
+    Parameters
+    ----------
+    X_train       : array (N, F)  raw preprocessed features (pre-MI)
+    y_train       : array (N,)    labels
+    model_class   : class         sklearn-compatible estimator class
+    model_params  : dict          kwargs for model_class(...)
+    n_splits      : int
+    mi_k          : int           top-k MI features to select per fold
+    pca_variance  : float         cumulative variance to retain
+    k_neighbors   : int           SMOTE neighbour count
+    random_state  : int
+    use_sample_weight : bool
+    strategy      : 'kmeans' | 'smote'
+    n_clusters    : int           K-means clusters for K-means SMOTE
+
+    Returns
+    -------
+    metrics       : dict  {metric_name: [fold_values]}
+    selector      : fitted SelectKBest  (last fold, for retrain reference)
+    scaler        : fitted StandardScaler (last fold)
+    pca           : fitted PCA            (last fold)
+    """
+    skf = StratifiedKFold(n_splits=n_splits, shuffle=True,
+                          random_state=random_state)
+
+    metrics = {
+        'accuracy': [], 'precision': [], 'recall': [],
+        'f1': [], 'auc': [],
+    }
+
+    selector, scaler, pca = None, None, None
+
+    for fold, (trn_idx, val_idx) in enumerate(skf.split(X_train, y_train)):
+        print(f"\n    Fold {fold+1}/{n_splits}")
+        t0 = time.time()
+
+        X_tr, X_val = X_train[trn_idx], X_train[val_idx]
+        y_tr, y_val = y_train[trn_idx], y_train[val_idx]
+
+        # --- 1. MI Feature Selection fitted on fold train only ---
+        fold_selector = SelectKBest(score_func=mutual_info_classif, k=mi_k)
+        fold_selector.fit(X_tr, y_tr)
+        X_tr_mi = fold_selector.transform(X_tr)
+        X_val_mi = fold_selector.transform(X_val)
+
+        # --- 2. StandardScaler fitted on fold train only ---
+        fold_scaler = StandardScaler()
+        X_tr_s = fold_scaler.fit_transform(X_tr_mi)
+        X_val_s = fold_scaler.transform(X_val_mi)
+
+        # --- 3. PCA fitted on scaled fold train only ---
+        fold_pca = PCA(n_components=pca_variance, random_state=random_state)
+        X_tr_p = fold_pca.fit_transform(X_tr_s)
+        X_val_p = fold_pca.transform(X_val_s)
+
+        print(f"      MI k={mi_k} | PCA components: {X_tr_p.shape[1]}")
+
+        # --- 4. Balancing on fold train only ---
+        X_tr_b, y_tr_b = balance_training_fold(
+            X_tr_p, y_tr,
+            strategy=strategy,
+            k_neighbors=k_neighbors,
+            n_clusters=n_clusters,
+            random_state=random_state,
+        )
+        print(f"      Balanced: {X_tr_b.shape[0]:,} samples")
+
+        # --- 5. Train + eval ---
+        model = model_class(**model_params)
+        fold_metrics = train_and_score_fold(
+            model, X_tr_b, y_tr_b, X_val_p, y_val,
+            use_sample_weight=use_sample_weight,
+        )
+
+        for k in metrics:
+            metrics[k].append(fold_metrics[k])
+
+        elapsed = time.time() - t0
+        print(f"      Acc={fold_metrics['accuracy']:.4f}  "
+              f"F1={fold_metrics['f1']:.4f}  "
+              f"AUC={fold_metrics['auc']:.4f}  ({elapsed:.1f}s)")
+
+        # keep last fold's transformers for final retraining
+        selector, scaler, pca = fold_selector, fold_scaler, fold_pca
+
+        del X_tr, X_val, X_tr_mi, X_val_mi, X_tr_s, X_val_s
+        del X_tr_p, X_val_p, X_tr_b, y_tr_b, model; gc.collect()
+
+    return metrics, selector, scaler, pca

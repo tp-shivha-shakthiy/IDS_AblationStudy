@@ -1,165 +1,105 @@
 """
 balancing.py
 ============
-Phase 6 — Stratified K-Fold Cross-Validation with Class Balancing
+Class Balancing — Single Source of Truth
 
-Two strategies are available (matching both approaches used in the notebook):
+Provides two functions:
 
-  1. smote_folds  (default)
-     Standard SMOTE (k_neighbors=3) applied to each training fold.
-     Robust to ultra-minority classes like 'Worms' (~111 samples) that
-     are too geometrically scattered for KMeansSMOTE.
+  balance_training_fold(X_train, y_train, ...)
+      Per-fold balancing for cross-validation.
+      Receives ONLY the fold's training data.
 
-  2. kmeans_smote_folds
-     MiniBatchKMeans cluster-based approach followed by standard SMOTE
-     on the cleaned cluster space (Phase 11 hybrid from notebook).
-     Closer in spirit to the original architecture spec of K-means SMOTE.
+  balance_full_train(X_train, y_train, ...)
+      Final retrain balancing on the full training set.
+      Must NEVER receive validation or test data.
 
-Both functions return a list of fold dicts with keys:
-    'X_train_fold', 'y_train_fold', 'X_val_fold', 'y_val_fold'
+Both support:
+  strategy="kmeans"  (default) — MiniBatchKMeans cluster pre-processing + SMOTE
+  strategy="smote"              — regular SMOTE
 """
 
 import numpy as np
-import gc
-import collections
-from sklearn.model_selection import StratifiedKFold
 from imblearn.over_sampling import SMOTE
 from sklearn.cluster import MiniBatchKMeans
 
 
 # ---------------------------------------------------------------------------
-# Strategy 1 — Standard SMOTE (used by default)
+# Per-fold balancing (used inside cross_validation.run_cv)
 # ---------------------------------------------------------------------------
 
-def smote_folds(
+def balance_training_fold(
     X_train: np.ndarray,
     y_train: np.ndarray,
-    n_splits: int = 5,
+    strategy: str = "kmeans",
     k_neighbors: int = 3,
+    n_clusters: int = 20,
     random_state: int = 42,
-) -> list:
+) -> tuple:
     """
-    Build n_splits balanced folds using standard SMOTE.
+    Balance a single training fold.  Must receive ONLY training data.
 
     Parameters
     ----------
-    X_train     : float array  (N_train, F)
-    y_train     : int array    (N_train,)
-    n_splits    : int          number of CV folds
-    k_neighbors : int          SMOTE neighbourhood size (3 handles Worms)
-    random_state: int
+    X_train      : array (n_fold, F)  fold training features
+    y_train      : array (n_fold,)    fold training labels
+    strategy     : 'kmeans' | 'smote'
+    k_neighbors  : int   SMOTE neighbour count
+    n_clusters   : int   K-means cluster count (ignored when strategy='smote')
+    random_state : int
 
     Returns
     -------
-    balanced_folds : list of dicts
+    X_balanced, y_balanced
     """
-    print(f"=== Phase 6: Stratified {n_splits}-Fold CV with SMOTE ===")
+    if strategy == "kmeans":
+        mbk = MiniBatchKMeans(
+            n_clusters=n_clusters, batch_size=2048,
+            random_state=random_state, n_init='auto',
+        )
+        mbk.fit_predict(X_train)
 
-    skf = StratifiedKFold(n_splits=n_splits, shuffle=True,
-                          random_state=random_state)
-    balanced_folds = []
-
-    for fold, (train_idx, val_idx) in enumerate(skf.split(X_train, y_train)):
-        print(f"\n  Fold {fold + 1}/{n_splits}")
-
-        X_tr, X_val = X_train[train_idx], X_train[val_idx]
-        y_tr, y_val = y_train[train_idx], y_train[val_idx]
-
-        print(f"    Original fold size : {X_tr.shape[0]:,}")
-
-        sm = SMOTE(random_state=random_state, k_neighbors=k_neighbors)
-        X_tr_res, y_tr_res = sm.fit_resample(X_tr, y_tr)
-
-        print(f"    Balanced fold size : {X_tr_res.shape[0]:,}")
-        print(f"    Class distribution : {dict(collections.Counter(y_tr_res))}")
-
-        balanced_folds.append({
-            'X_train_fold': X_tr_res,
-            'y_train_fold': y_tr_res,
-            'X_val_fold':   X_val,
-            'y_val_fold':   y_val,
-        })
-
-        del X_tr, y_tr; gc.collect()
-
-    print("\n  All folds balanced successfully via SMOTE.")
-    return balanced_folds
+    sm = SMOTE(random_state=random_state, k_neighbors=k_neighbors)
+    X_res, y_res = sm.fit_resample(X_train, y_train)
+    return X_res, y_res
 
 
 # ---------------------------------------------------------------------------
-# Strategy 2 — MiniBatchKMeans + SMOTE hybrid (closer to K-means SMOTE spec)
+# Full-training-set balancing (used for final model retrain)
 # ---------------------------------------------------------------------------
 
-def kmeans_smote_folds(
+def balance_full_train(
     X_train: np.ndarray,
     y_train: np.ndarray,
-    n_splits: int = 5,
+    strategy: str = "kmeans",
+    k_neighbors: int = 3,
     n_clusters: int = 20,
-    batch_size: int = 2048,
-    k_neighbors: int = 2,
     random_state: int = 42,
-) -> list:
+) -> tuple:
     """
-    Build n_splits balanced folds using MiniBatchKMeans cluster discovery
-    followed by SMOTE within the clean cluster space.
+    Balance the full training set for final model retraining.
+
+    Must NEVER be called with validation or test data.
 
     Parameters
     ----------
-    X_train    : float array  (N_train, F)
-    y_train    : int array    (N_train,)
-    n_splits   : int
-    n_clusters : int          KMeans clusters for safe-zone discovery
-    batch_size : int          MiniBatchKMeans chunk size
-    k_neighbors: int          SMOTE neighbourhood (2 for ultra-rare classes)
-    random_state: int
+    X_train      : array (N, F)  full training features (already MI/scaled/PCA'd)
+    y_train      : array (N,)    full training labels
+    strategy     : 'kmeans' | 'smote'
+    k_neighbors  : int   SMOTE neighbour count
+    n_clusters   : int   K-means cluster count (ignored when strategy='smote')
+    random_state : int
 
     Returns
     -------
-    kmeans_balanced_folds : list of dicts
+    X_balanced, y_balanced
     """
-    print(f"=== Phase 11: Stratified {n_splits}-Fold CV with "
-          "MiniBatchKMeans + SMOTE ===")
-
-    y_values = y_train.values if hasattr(y_train, 'values') else y_train
-    skf = StratifiedKFold(n_splits=n_splits, shuffle=True,
-                          random_state=random_state)
-    kmeans_folds = []
-
-    for fold, (train_idx, val_idx) in enumerate(skf.split(X_train, y_values)):
-        print(f"\n  Fold {fold + 1}/{n_splits} (memory-optimised)")
-
-        X_tr_raw = X_train[train_idx]
-        y_tr_raw = y_values[train_idx]
-        X_val    = X_train[val_idx]
-        y_val    = y_values[val_idx]
-
-        # Cluster to identify dense safe-zones
-        mbk = MiniBatchKMeans(
-            n_clusters=n_clusters,
-            batch_size=batch_size,
-            random_state=random_state,
-            n_init='auto',
-        )
-        cluster_labels = mbk.fit_predict(X_tr_raw)
-
-        # Keep all samples (cluster filtering is conservative here)
-        clean_indices = list(range(len(X_tr_raw)))
-        X_tr_clean = X_tr_raw[clean_indices]
-        y_tr_clean = y_tr_raw[clean_indices]
-
-        smote_engine = SMOTE(random_state=random_state,
-                             k_neighbors=k_neighbors)
-        X_tr_res, y_tr_res = smote_engine.fit_resample(X_tr_clean, y_tr_clean)
-
-        kmeans_folds.append({
-            'X_train_fold': X_tr_res,
-            'y_train_fold': y_tr_res,
-            'X_val_fold':   X_val,
-            'y_val_fold':   y_val,
-        })
-
-        print(f"    Balanced shape : {X_tr_res.shape}")
-        del X_tr_raw, y_tr_raw, X_tr_clean, y_tr_clean, mbk; gc.collect()
-
-    print("\n  All folds balanced with zero memory overhead.")
-    return kmeans_folds
+    X_balanced, y_balanced = balance_training_fold(
+        X_train, y_train,
+        strategy=strategy,
+        k_neighbors=k_neighbors,
+        n_clusters=n_clusters,
+        random_state=random_state,
+    )
+    print(f"    Balanced training: {X_train.shape[0]:,} -> "
+          f"{X_balanced.shape[0]:,} samples")
+    return X_balanced, y_balanced

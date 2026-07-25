@@ -1,131 +1,47 @@
-import pandas as pd
-import numpy as np
-import gc
+"""
+train_Bi-LSTM_shared-feature-extractor.py
+==========================================
+Multi-Task Hierarchical DNN with shared feature extractor.
+
+Uses shared infrastructure from src/dl_pipeline.py.
+Architecture preserved:
+  Shared base: Linear(in→128)→BN→ReLU→Drop(0.2)→Linear(128→64)→BN→ReLU→Drop(0.2)
+  Binary head: Linear(64→2)
+  Multi head:  Linear(64→32)→ReLU→Linear(32→num_classes)
+  Loss: 0.4 * CE(binary) + 0.6 * CE(multi)
+"""
+
+import sys
 import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
-from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.model_selection import StratifiedKFold
-from sklearn.feature_selection import mutual_info_classif
-from sklearn.decomposition import PCA
-from sklearn.metrics import accuracy_score, f1_score
 
-# Set deterministic seeds for deep learning reproducibility
-torch.manual_seed(42)
-np.random.seed(42)
+from src.dl_pipeline import (
+    set_seeds, get_device, load_data,
+    preprocess_fold, preprocess_final,
+    evaluate_predictions, save_dl_artifacts,
+)
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-print(f"Using execution device: {device}")
-
-# =========================================================================
-# === PHASE 3: PRODUCTION PREPROCESSING LAYER ===
-# =========================================================================
-print("\n=== Phase 3: Commencing Preprocessing Layer ===")
-
-col_names = [
-    'srcip', 'sport', 'dstip', 'dsport', 'proto', 'state', 'dur', 'sbytes', 'dbytes', 'sttl', 'dttl', 'sloss',
-    'dloss', 'service', 'sload', 'dload', 'spkts', 'dpkts', 'swin', 'dwin', 'stcpb', 'dtcpb', 'smeansz', 'dmeansz',
-    'trans_depth', 'res_bdy_len', 'sjit', 'djit', 'sintpkt', 'dintpkt', 'tcprtt', 'synack', 'ackdat', 'is_sm_ips_ports',
-    'ct_src_ltm', 'ct_dst_ltm', 'ct_src_dport_ltm', 'ct_dst_sport_ltm', 'ct_dst_src_ltm', 'is_ftp_login',
-    'ct_ftp_cmd', 'ct_flw_http_mthd', 'ct_src_ltm_d', 'ct_srv_dst', 'ct_state_ttl', 'ct_src_user_ltm',
-    'ct_src_zone_ltm', 'ct_dst_host_ltm', 'ct_srv_src', 'ct_dst_sport_ltm_d', 'ct_dst_src_ltm_d',
-    'ct_src_ltm_d_d', 'ct_src_ltm_d_s', 'ct_dst_ltm_d_d', 'ct_dst_ltm_d_s', 'ct_srv_dst_d', 'ct_srv_src_d',
-    'ct_state_ttl_d', 'ct_src_user_ltm_d', 'ct_src_zone_ltm_d', 'ct_dst_host_ltm_d', 'ct_srv_dst_d_d',
-    'ct_srv_src_d_d', 'ct_state_ttl_d_d', 'ct_src_user_ltm_d_d', 'ct_src_zone_ltm_d_d', 'ct_dst_host_ltm_d_d',
-    'ct_srv_dst_d_d_d', 'ct_srv_src_d_d_d', 'ct_state_ttl_d_d_d', 'ct_src_user_ltm_d_d_d',
-    'ct_src_zone_ltm_d_d_d', 'ct_dst_host_ltm_d_d_d', 'id', 'attack_cat', 'label'
-]
-
-files = [f'UNSW-NB15_{i}.csv' for i in range(1, 4 + 1)]
-df_list = []
-
-for f in files:
-    try:
-        print(f"Loading {f}...")
-        df_temp = pd.read_csv(f, header=None, low_memory=False)
-        if df_temp.shape[1] == 49:
-            df_temp.columns = col_names[:47] + ['attack_cat', 'label']
-        else:
-            df_temp.columns = col_names[:df_temp.shape[1]]
-        df_list.append(df_temp)
-    except FileNotFoundError:
-        print(f"⚠️ Warning: {f} not found.")
-
-df = pd.concat(df_list, ignore_index=True)
-print(f"Data Ingestion Complete. Combined Shape: {df.shape}")
-
-target_col = 'attack_cat'
-df[target_col] = df[target_col].fillna('Normal').astype(str).str.strip().str.lower()
-
-category_mapping = {
-    'normal': 'Normal', 'fuzzers': 'Fuzzers', 'analysis': 'Analysis',
-    'backdoor': 'Backdoor', 'dos': 'DoS', 'exploits': 'Exploits',
-    'generic': 'Generic', 'reconnaissance': 'Reconnaissance',
-    'shellcode': 'Shellcode', 'worms': 'Worms'
-}
-df[target_col] = df[target_col].map(category_mapping).fillna('Normal')
-
-target_encoder = LabelEncoder()
-y_multi = target_encoder.fit_transform(df[target_col])
-num_classes = len(target_encoder.classes_)
-normal_class_idx = list(target_encoder.classes_).index('Normal')
-
-# Deriving explicit binary targets directly mapping to multi-class ground truths
-y_binary = (y_multi != normal_class_idx).astype(int)
-
-drop_cols = ['id', 'label', 'stime', 'ltime', 'srcip', 'dstip']
-X_raw = df.drop([c for c in drop_cols if c in df.columns] + [target_col], axis=1)
-del df, df_list; gc.collect()
-
-# --- Continuous Feature Log-Transformation Layer ---
-for port_col in ['sport', 'dsport']:
-    if port_col in X_raw.columns:
-        X_raw[port_col] = pd.to_numeric(X_raw[port_col], errors='coerce').fillna(-1).astype('int32')
-
-true_cat_features = ['proto', 'state', 'service']
-binary_features = ['is_ftp_login', 'is_sm_ips_ports']
-continuous_features = [col for col in X_raw.columns if col not in true_cat_features + binary_features]
-
-X_continuous = np.log1p(X_raw[continuous_features].clip(lower=0)).fillna(0).astype('float32')
-
-X_categorical = pd.DataFrame(index=X_raw.index)
-for col in true_cat_features:
-    if col in X_raw.columns:
-        X_categorical[col] = LabelEncoder().fit_transform(X_raw[col].astype(str)).astype('float32')
-
-X_binary = X_raw[binary_features].apply(pd.to_numeric, errors='coerce').fillna(0).astype('float32')
-
-X_processed = np.hstack([X_continuous.values, X_categorical.values, X_binary.values])
-print("🎉 Base feature space extraction successful.")
-del X_raw, X_continuous, X_categorical, X_binary; gc.collect()
+set_seeds(42)
+device = get_device()
+MODEL_NAME = "BiLSTM_SharedFE"
 
 
-# =========================================================================
-# === HYBRID CONFIGURATION LAYER: MI + PCA ===
-# =========================================================================
-print("\n=== Executing Configuration Pipeline (MI + PCA Only) ===")
-sample_size = min(50000, len(X_processed))
-idx_sample = np.random.choice(len(X_processed), sample_size, replace=False)
-mi_scores = mutual_info_classif(X_processed[idx_sample], y_multi[idx_sample], random_state=42)
-top_feature_indices = np.argsort(mi_scores)[-30:]
-X_mi = X_processed[:, top_feature_indices]
+# ======================================================================
+# Model Architecture (preserved from original)
+# ======================================================================
 
-pca = PCA(n_components=15, random_state=42)
-X_pca = pca.fit_transform(X_mi)
-del X_processed, X_mi; gc.collect()
-
-
-# =========================================================================
-# === PHASE 11: MULTI-TASK HIERARCHICAL NEURAL NETWORK ARCHITECTURE ===
-# =========================================================================
 class MultiTaskHierarchicalDNN(nn.Module):
-    def __init__(self, input_dim, num_multi_classes):
-        super(MultiTaskHierarchicalDNN, self).__init__()
-        
-        # Shared Feature Extractor Base
-        self.shared_base = nn.Sequential(
+    def __init__(self, input_dim, num_classes):
+        super().__init__()
+        # Shared feature extractor
+        self.shared = nn.Sequential(
             nn.Linear(input_dim, 128),
             nn.BatchNorm1d(128),
             nn.ReLU(),
@@ -133,95 +49,166 @@ class MultiTaskHierarchicalDNN(nn.Module):
             nn.Linear(128, 64),
             nn.BatchNorm1d(64),
             nn.ReLU(),
-            nn.Dropout(0.2)
+            nn.Dropout(0.2),
         )
-        
-        # Binary Classification Head (Outputs 2 logits)
+        # Binary head (Normal vs Attack)
         self.binary_head = nn.Linear(64, 2)
-        
-        # Multi-Class Classification Head (Outputs num_multi_classes logits)
+        # Multi-class head (9 attack categories)
         self.multi_head = nn.Sequential(
             nn.Linear(64, 32),
             nn.ReLU(),
-            nn.Linear(32, num_multi_classes)
+            nn.Linear(32, num_classes),
         )
-        
+
     def forward(self, x):
-        shared_features = self.shared_base(x)
-        binary_logits = self.binary_head(shared_features)
-        multi_logits = self.multi_head(shared_features)
-        return binary_logits, multi_logits
+        features = self.shared(x)
+        binary_out = self.binary_head(features)
+        multi_out = self.multi_head(features)
+        return binary_out, multi_out
 
 
-# =========================================================================
-# === STRATIFIED CROSS-VALIDATION LOOP ===
-# =========================================================================
-print("\n=== Running Multi-Task Hierarchical Stratified Cross-Validation ===")
-skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-fold_metrics = []
+# ======================================================================
+# Pipeline
+# ======================================================================
 
-for fold, (train_idx, val_idx) in enumerate(skf.split(X_pca, y_multi), 1):
-    X_tr, y_tr_bin, y_tr_mul = X_pca[train_idx], y_binary[train_idx], y_multi[train_idx]
-    X_val, y_val_bin, y_val_mul = X_pca[val_idx], y_binary[val_idx], y_multi[val_idx]
-    
-    scaler = StandardScaler()
-    X_tr_s = scaler.fit_transform(X_tr)
-    X_va_s = scaler.transform(X_val)
-    
-    # Bundle features with dual target arrays
-    dataset = TensorDataset(
-        torch.tensor(X_tr_s, dtype=torch.float32),
-        torch.tensor(y_tr_bin, dtype=torch.long),
-        torch.tensor(y_tr_mul, dtype=torch.long)
+def main(data_dir="data/raw"):
+    data = load_data(data_dir)
+    X_train, X_test = data['X_train'], data['X_test']
+    y_train, y_test = data['y_train'], data['y_test']
+    num_classes = data['num_classes']
+    normal_class_idx = data['normal_class_idx']
+    class_names = data['class_names']
+
+    print(f"\n{'='*60}")
+    print(f"  {MODEL_NAME} — Multi-Task Hierarchical DNN")
+    print(f"{'='*60}")
+    print(f"\n  Cross-Validation (5 folds)")
+
+    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    cv_metrics = []
+
+    for fold, (trn_idx, val_idx) in enumerate(skf.split(X_train, y_train), 1):
+        print(f"\n  Fold {fold}/5")
+        X_tr, y_tr = X_train[trn_idx], y_train[trn_idx]
+        X_val, y_val = X_train[val_idx], y_train[val_idx]
+
+        fold_data = preprocess_fold(
+            X_tr, y_tr, X_val, y_val,
+            mi_k=30, pca_components=15,
+            n_clusters=20, k_neighbors=2, rus_cap=15000,
+        )
+
+        y_tr_binary = (fold_data['y_tr'] != normal_class_idx).astype(int)
+        y_val_binary = (fold_data['y_val'] != normal_class_idx).astype(int)
+
+        X_tr_t = torch.tensor(fold_data['X_tr'], dtype=torch.float32)
+        y_tr_t = torch.tensor(fold_data['y_tr'], dtype=torch.long)
+        y_tr_bin_t = torch.tensor(y_tr_binary, dtype=torch.long)
+        X_val_t = torch.tensor(fold_data['X_val'], dtype=torch.float32)
+
+        train_loader = DataLoader(
+            TensorDataset(X_tr_t, y_tr_t, y_tr_bin_t),
+            batch_size=512, shuffle=True,
+        )
+
+        model = MultiTaskHierarchicalDNN(
+            fold_data['X_tr'].shape[1], num_classes,
+        ).to(device)
+
+        ce_multi = nn.CrossEntropyLoss()
+        ce_binary = nn.CrossEntropyLoss()
+        optimizer = optim.AdamW(model.parameters(), lr=0.005, weight_decay=1e-4)
+
+        model.train()
+        for epoch in range(8):
+            for bx, by_multi, by_bin in train_loader:
+                bx = bx.to(device)
+                by_multi = by_multi.to(device)
+                by_bin = by_bin.to(device)
+                optimizer.zero_grad()
+                bin_out, multi_out = model(bx)
+                loss = 0.4 * ce_binary(bin_out, by_bin) + 0.6 * ce_multi(multi_out, by_multi)
+                loss.backward()
+                optimizer.step()
+
+        model.eval()
+        with torch.no_grad():
+            bin_out, multi_out = model(X_val_t.to(device))
+            preds_multi = torch.argmax(multi_out, dim=1).cpu().numpy()
+
+        metrics = evaluate_predictions(y_val, preds_multi, normal_class_idx)
+        metrics['fold'] = fold
+        cv_metrics.append(metrics)
+        print(f"    Acc={metrics['multi_acc']:.4f}  F1={metrics['weighted_f1']:.4f}")
+
+    # --- Final retrain ---
+    print(f"\n  === Final Retrain ===")
+    final_data = preprocess_final(
+        X_train, y_train, X_test, y_test,
+        mi_k=30, pca_components=15,
+        n_clusters=20, k_neighbors=2, rus_cap=15000,
     )
-    train_loader = DataLoader(dataset, batch_size=512, shuffle=True)
-    
-    model = MultiTaskHierarchicalDNN(input_dim=X_pca.shape[1], num_multi_classes=num_classes).to(device)
-    
-    loss_fn_bin = nn.CrossEntropyLoss()
-    loss_fn_mul = nn.CrossEntropyLoss()
-    optimizer = optim.AdamW(model.parameters(), lr=0.005, weight_decay=1e-4)
-    
-    model.train()
+
+    y_tr_binary = (final_data['y_train'] != normal_class_idx).astype(int)
+
+    X_tr_t = torch.tensor(final_data['X_train'], dtype=torch.float32)
+    y_tr_t = torch.tensor(final_data['y_train'], dtype=torch.long)
+    y_tr_bin_t = torch.tensor(y_tr_binary, dtype=torch.long)
+    X_te_t = torch.tensor(final_data['X_test'], dtype=torch.float32)
+
+    train_loader = DataLoader(
+        TensorDataset(X_tr_t, y_tr_t, y_tr_bin_t),
+        batch_size=512, shuffle=True,
+    )
+
+    final_model = MultiTaskHierarchicalDNN(
+        final_data['X_train'].shape[1], num_classes,
+    ).to(device)
+
+    ce_multi = nn.CrossEntropyLoss()
+    ce_binary = nn.CrossEntropyLoss()
+    optimizer = optim.AdamW(final_model.parameters(), lr=0.005, weight_decay=1e-4)
+
+    final_model.train()
     for epoch in range(8):
-        for batch_x, batch_y_bin, batch_y_mul in train_loader:
-            batch_x, batch_y_bin, batch_y_mul = batch_x.to(device), batch_y_bin.to(device), batch_y_mul.to(device)
-            
+        for bx, by_multi, by_bin in train_loader:
+            bx = bx.to(device)
+            by_multi = by_multi.to(device)
+            by_bin = by_bin.to(device)
             optimizer.zero_grad()
-            out_bin, out_mul = model(batch_x)
-            
-            # Multi-Task Joint Optimization Layer
-            # Weight allocation: 40% Binary focus protection, 60% Multi-class separation push
-            loss = (0.40 * loss_fn_bin(out_bin, batch_y_bin)) + (0.60 * loss_fn_mul(out_mul, batch_y_mul))
+            bin_out, multi_out = final_model(bx)
+            loss = 0.4 * ce_binary(bin_out, by_bin) + 0.6 * ce_multi(multi_out, by_multi)
             loss.backward()
             optimizer.step()
-            
-    model.eval()
+
+    # --- Test evaluation ---
+    final_model.eval()
     with torch.no_grad():
-        val_x_t = torch.tensor(X_va_s, dtype=torch.float32).to(device)
-        pred_bin_logits, pred_mul_logits = model(val_x_t)
-        
-        preds_bin = torch.argmax(pred_bin_logits, dim=1).cpu().numpy()
-        preds_mul = torch.argmax(pred_mul_logits, dim=1).cpu().numpy()
-        
-    fold_metrics.append([
-        fold,
-        accuracy_score(y_val_bin, preds_bin),
-        f1_score(y_val_bin, preds_bin, average='binary'),
-        accuracy_score(y_val_mul, preds_mul),
-        f1_score(y_val_mul, preds_mul, average='macro'),
-        f1_score(y_val_mul, preds_mul, average='weighted')
-    ])
-    print(f"🧠 Fold {fold} / 5 Hierarchical Optimization Complete.")
-    del X_tr_s, X_va_s, train_loader, model; gc.collect()
+        _, multi_out = final_model(X_te_t.to(device))
+        test_preds = torch.argmax(multi_out, dim=1).cpu().numpy()
 
-# =========================================================================
-# === METRIC DISPLAY MATRIX ===
-# =========================================================================
-print("\n=== Cross-Validation Matrix (Hierarchical Multi-Task DNN) ===")
-df_res = pd.DataFrame(fold_metrics, columns=['Fold', 'Binary Acc', 'Binary F1', 'Multi-Acc', 'Multi-F1 (Macro)', 'Weighted F1'])
-print(df_res.to_string(index=False))
+    test_metrics = evaluate_predictions(y_test, test_preds, normal_class_idx)
 
-print("-" * 85)
-print(f"Mean Average |  {df_res['Binary Acc'].mean():.6f}  |  {df_res['Binary F1'].mean():.6f}  |  {df_res['Multi-Acc'].mean():.6f}  |  {df_res['Multi-F1 (Macro)'].mean():.6f}  |  {df_res['Weighted F1'].mean():.6f}")
-print("-" * 85)
+    print(f"\n  {MODEL_NAME} Test Metrics:")
+    for k, v in test_metrics.items():
+        if k != 'fold':
+            print(f"    {k:>12s}: {v:.4f}")
+
+    save_dl_artifacts(
+        final_model, MODEL_NAME,
+        cv_metrics=cv_metrics,
+        test_metrics=test_metrics,
+        class_names=class_names,
+        normal_class_idx=normal_class_idx,
+        y_test=y_test, y_test_pred=test_preds,
+    )
+
+    return final_model, cv_metrics, test_metrics
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--data-dir", default="data/raw")
+    args = parser.parse_args()
+    main(data_dir=args.data_dir)

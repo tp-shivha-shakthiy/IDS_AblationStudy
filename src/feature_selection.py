@@ -1,14 +1,14 @@
 """
 feature_selection.py
 ====================
-Phase 4a — Mutual Information Feature Selection
+Phase 4a -- Mutual Information Feature Selection
 
-Uses a 5 % stratified sample of the full preprocessed matrix to compute
-mutual-information scores efficiently, then transforms the entire matrix
-to keep only the top-k features.
+Fits a SelectKBest selector using Mutual Information scores on a
+stratified sample of the provided data.  The caller MUST pass only
+training data to avoid leakage.
 
-Returns the reduced matrix and the fitted selector (for later inspection
-of selected feature names / indices).
+The returned *selector* can later be used with
+``apply_feature_selection`` to transform any split without refitting.
 """
 
 import numpy as np
@@ -25,7 +25,7 @@ def select_features(
     random_state: int = 42,
 ) -> tuple:
     """
-    Select the top-k features using Mutual Information scores.
+    Fit MI feature selection on the supplied data and transform it.
 
     Parameters
     ----------
@@ -37,8 +37,8 @@ def select_features(
 
     Returns
     -------
-    X_mi       : np.ndarray  (N, k)    reduced feature matrix
-    selector   : SelectKBest           fitted selector
+    X_mi     : np.ndarray  (N, k)    reduced feature matrix
+    selector : SelectKBest           fitted selector
     """
     print("=== Phase 4a: Mutual Information Feature Selection ===")
 
@@ -61,3 +61,13 @@ def select_features(
     X_mi = selector.transform(X)
     print(f"  Top {k} features selected. Reduced shape: {X_mi.shape}")
     return X_mi, selector
+
+
+def apply_feature_selection(
+    X: np.ndarray,
+    selector: SelectKBest,
+) -> np.ndarray:
+    """
+    Apply a previously fitted selector to new data (e.g. test set).
+    """
+    return selector.transform(X)

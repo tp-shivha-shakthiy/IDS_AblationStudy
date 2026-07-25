@@ -1,0 +1,11 @@
+Model,Metric,Legacy,Corrected,Difference
+XGBoost,Binary Accuracy,0.984762,PENDING,-
+XGBoost,Binary F1,0.943081,PENDING,-
+XGBoost,Multiclass Accuracy,0.962359,PENDING,-
+XGBoost,Macro F1,0.451926,PENDING,-
+XGBoost,Weighted F1,0.970062,PENDING,-
+Logistic Regression,Binary Accuracy,0.982075,PENDING,-
+Logistic Regression,Binary F1,0.933704,PENDING,-
+Logistic Regression,Multiclass Accuracy,0.953530,PENDING,-
+Logistic Regression,Macro F1,0.370528,PENDING,-
+Logistic Regression,Weighted F1,0.962589,PENDING,-
