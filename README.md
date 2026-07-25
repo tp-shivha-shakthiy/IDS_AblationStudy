@@ -34,18 +34,18 @@ INTRUSION-DETECTION-SYSTEM/
 ├── main.py                              Pipeline orchestrator (sklearn models)
 ├── requirements.txt
 │
-├── src/                                 Shared pipeline modules
+├── src/                                 Shared pipeline modules + sklearn trainers
 │   ├── preprocessing.py                 Load, clean, encode, log1p normalisation
 │   ├── feature_selection.py             Mutual Information (SelectKBest)
 │   ├── dimensionality_reduction.py      StandardScaler → PCA → 80/20 split
 │   ├── balancing.py                     SMOTE / MiniBatchKMeans+SMOTE per fold
 │   ├── cross_validation.py              Shared stratified CV loop
-│   └── evaluation.py                    Confusion matrices, CSV results, plots
-│
-├── models/                              Model training scripts
+│   ├── evaluation.py                    Confusion matrices, CSV results, plots
 │   ├── train_hgb.py                     HistGradientBoostingClassifier (CV)
 │   ├── train_xgboost.py                 XGBoost (CV + blind holdout test)
-│   ├── train_logistic.py                Logistic Regression (multinomial/saga)
+│   └── train_logistic.py                Logistic Regression (multinomial/saga)
+│
+├── models/                              Self-contained deep learning training scripts
 │   ├── train_dnn.py                     PyTorch DNN with weighted cross-entropy
 │   ├── train_LSTM.py                    Bi-LSTM + MI + PCA + KMeansSMOTE
 │   ├── train_Bi-LSTM.py                 Weighted Bi-LSTM vs XGBoost dual pipeline
