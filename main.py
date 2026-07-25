@@ -1,46 +1,49 @@
 """
 main.py
 =======
-INTRUSION DETECTION SYSTEM — Full Pipeline Orchestrator
-========================================================
+INTRUSION DETECTION SYSTEM — Tier 1 Pipeline Orchestrator
+==========================================================
 
-Executes the complete IDS pipeline in order:
+Correct (leakage-free) pipeline:
 
-  Phase 3  Preprocessing       (preprocessing.py)
-  Phase 4a Feature Selection   (feature_selection.py)
-  Phase 4b Dimensionality Red. (dimensionality_reduction.py)
-  Phase 5  80/20 Split         (dimensionality_reduction.py)
-  Phase 6  CV + SMOTE Balance  (balancing.py)
-  Phase 7  HGB Training        (train_hgb.py)
-  Phase 8  XGBoost CV          (train_xgboost.py)
-  Phase 9  XGBoost Test Eval   (train_xgboost.py)
-  Phase 10 Logistic Regression (train_logistic.py)
-  Output   Evaluation + Plots  (evaluation.py)
+  Phase 3  Preprocessing             (preprocessing.py)
+  Phase 4  Stratified 80/20 Split    (dimensionality_reduction.py)
+  Phase 5  CV: MI→Scaler→PCA→Kmeans-SMOTE  (cross_validation.py) — per fold
+  Phase 6  HGB Training + Test Eval  (train_hgb.py)
+  Phase 7  XGBoost Training + Eval   (train_xgboost.py)
+  Phase 8  LogReg Training + Eval    (train_logistic.py)
+  Output   Evaluation + Plots        (evaluation.py)
+
+Critical invariants (no data leakage):
+  ✦ MI selection is fitted on fold-train only (inside CV loop)
+  ✦ StandardScaler is fitted on fold-train / full-train only
+  ✦ PCA is fitted on fold-train / full-train only
+  ✦ K-means SMOTE is applied to fold-train / full-train only — never val or test
+  ✦ Test set is locked and never touched until final evaluation
 
 Usage
 -----
   python main.py                        # default data/raw/
   python main.py --data-dir /path/csv   # custom raw data path
-  python main.py --balancer kmeans      # use MiniBatchKMeans+SMOTE
-  python main.py --skip-plots           # skip matplotlib output
+  python main.py --balancer smote        # use regular SMOTE instead
+  python main.py --skip-plots            # skip matplotlib output
 """
 
 import argparse
 import numpy as np
+import pandas as pd
 
-from src.preprocessing          import load_and_preprocess
-from src.feature_selection      import select_features
-from src.dimensionality_reduction import reduce_and_split
-from src.balancing              import smote_folds, kmeans_smote_folds
-from src.train_hgb              import train_hgb
-from src.train_xgboost          import train_xgboost
-from src.train_logistic         import train_logistic
-from src.evaluation             import (
-    plot_confusion_matrix,
-    plot_feature_importance,
+from src.preprocessing            import load_and_preprocess
+from src.dimensionality_reduction import split_data
+from src.train_hgb                import train_and_evaluate as train_hgb
+from src.train_xgboost            import train_and_evaluate as train_xgboost
+from src.train_logistic           import train_and_evaluate as train_logistic
+from src.evaluation               import (
     save_results,
+    save_preprocessing_artifacts,
     print_final_summary,
 )
+from src.experiment_config        import build_model_config, save_experiment_config
 
 
 # ---------------------------------------------------------------------------
@@ -49,15 +52,15 @@ from src.evaluation             import (
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="UNSW-NB15 Intrusion Detection System"
+        description="UNSW-NB15 Intrusion Detection System (Tier 1)"
     )
     parser.add_argument(
         '--data-dir', default='data/raw',
         help='Directory containing UNSW-NB15_1.csv … UNSW-NB15_4.csv'
     )
     parser.add_argument(
-        '--balancer', choices=['smote', 'kmeans'], default='smote',
-        help='Class-balancing strategy (default: smote)'
+        '--balancer', choices=['kmeans', 'smote'], default='kmeans',
+        help='Class-balancing strategy (default: kmeans)'
     )
     parser.add_argument(
         '--n-splits', type=int, default=5,
@@ -65,11 +68,11 @@ def parse_args():
     )
     parser.add_argument(
         '--mi-k', type=int, default=15,
-        help='Top-k MI features to retain (default: 15)'
+        help='Top-k MI features to retain per fold (default: 15)'
     )
     parser.add_argument(
-        '--pca-components', type=int, default=10,
-        help='PCA components (default: 10)'
+        '--pca-variance', type=float, default=0.95,
+        help='Cumulative PCA variance to retain (default: 0.95)'
     )
     parser.add_argument(
         '--skip-plots', action='store_true',
@@ -86,102 +89,108 @@ def main():
     args = parse_args()
 
     # ------------------------------------------------------------------
-    # Phase 3 — Preprocessing
+    # Phase 3 — Preprocessing  (deterministic, no fit on test)
     # ------------------------------------------------------------------
     X_processed, y_multi, le = load_and_preprocess(data_dir=args.data_dir)
-    normal_class_idx = int(np.where(le.classes_ == 'Normal')[0][0])
     class_names = list(le.classes_)
 
     # ------------------------------------------------------------------
-    # Phase 4a — MI Feature Selection
+    # Phase 4 — Stratified 80/20 Holdout Split  (NO fitting here)
     # ------------------------------------------------------------------
-    X_mi, selector = select_features(
-        X_processed, y_multi, k=args.mi_k
-    )
+    X_train, X_test, y_train, y_test = split_data(X_processed, y_multi)
     del X_processed
 
     # ------------------------------------------------------------------
-    # Phase 4b + 5 — PCA + 80/20 Split
+    # Phase 5 — Per-fold CV is handled inside each trainer:
+    #   MI fit on fold train → transform fold train + val
+    #   StandardScaler fit on fold train → transform fold train + val
+    #   PCA fit on fold train → transform fold train + val
+    #   K-means SMOTE on fold train only
     # ------------------------------------------------------------------
-    X_train, X_test, y_train, y_test, scaler, pca = reduce_and_split(
-        X_mi, y_multi, n_components=args.pca_components
-    )
-    del X_mi
 
     # ------------------------------------------------------------------
-    # Phase 6 — Balanced CV Folds
+    # Phase 6 — HistGradientBoosting  (CV + retrain + test eval)
     # ------------------------------------------------------------------
-    if args.balancer == 'kmeans':
-        print("\nUsing MiniBatchKMeans + SMOTE balancing strategy.")
-        balanced_folds = kmeans_smote_folds(
-            X_train, y_train, n_splits=args.n_splits
-        )
-    else:
-        print("\nUsing standard SMOTE balancing strategy.")
-        balanced_folds = smote_folds(
-            X_train, y_train, n_splits=args.n_splits
-        )
-
-    # ------------------------------------------------------------------
-    # Phase 7 — HistGradientBoosting
-    # ------------------------------------------------------------------
-    hgb_cv_df, hgb_model = train_hgb(
-        balanced_folds, normal_class_idx, class_names
+    hgb_results = train_hgb(
+        X_train, y_train, X_test, y_test,
+        class_names=class_names,
+        n_splits=args.n_splits,
+        mi_k=args.mi_k,
+        pca_variance=args.pca_variance,
     )
 
     # ------------------------------------------------------------------
-    # Phase 8 + 9 — XGBoost
+    # Phase 7 — XGBoost  (CV + retrain + test eval)
     # ------------------------------------------------------------------
-    xgb_cv_df, xgb_test_df, xgb_model = train_xgboost(
-        balanced_folds, X_test, y_test,
-        normal_class_idx, class_names,
-        num_class=len(class_names),
+    xgb_results = train_xgboost(
+        X_train, y_train, X_test, y_test,
+        class_names=class_names,
+        n_splits=args.n_splits,
+        mi_k=args.mi_k,
+        pca_variance=args.pca_variance,
     )
 
     # ------------------------------------------------------------------
-    # Phase 10 — Logistic Regression
+    # Phase 8 — Logistic Regression  (CV + retrain + test eval)
     # ------------------------------------------------------------------
-    lr_cv_df, lr_test_df, lr_model = train_logistic(
-        balanced_folds, X_test, y_test,
-        normal_class_idx, class_names,
+    lr_results = train_logistic(
+        X_train, y_train, X_test, y_test,
+        class_names=class_names,
+        n_splits=args.n_splits,
+        mi_k=args.mi_k,
+        pca_variance=args.pca_variance,
     )
 
     # ------------------------------------------------------------------
-    # Output Layer — Evaluation
+    # Output Layer — Model Comparison
     # ------------------------------------------------------------------
-    all_test_results = [xgb_test_df, lr_test_df]
-    cv_results = {
-        'HGB':     hgb_cv_df,
-        'XGBoost': xgb_cv_df,
-        'LogReg':  lr_cv_df,
-    }
+    all_test_results = []
+    cv_results = {}
+    y_pred_dict = {}
+
+    for name, res in [('HGB', hgb_results), ('XGBoost', xgb_results),
+                      ('LogReg', lr_results)]:
+        row = {'Model': name}
+        row.update(res['test_metrics'])
+        all_test_results.append(pd.DataFrame([row]))
+        cv_results[name] = pd.DataFrame(res['cv_metrics'])
+        y_pred_dict[name] = res['y_test_pred']
 
     print_final_summary(all_test_results)
-    save_results(all_test_results, cv_results)
+    save_results(
+        all_test_results, cv_results,
+        y_true=y_test, y_pred_dict=y_pred_dict,
+        class_names=class_names,
+    )
 
-    if not args.skip_plots:
-        print("\n=== Generating evaluation plots ===")
-
-        # XGBoost confusion matrices
-        y_xgb_pred = xgb_model.predict(X_test)
-        plot_confusion_matrix(
-            y_test, y_xgb_pred, class_names, normal_class_idx,
-            save_dir='assets', prefix='xgboost_',
+    # --- Save preprocessing artifacts for each model ---
+    for name, res in [('hgb', hgb_results), ('xgboost', xgb_results),
+                      ('logistic_regression', lr_results)]:
+        artifact_dir = f"artifacts/{name}"
+        save_preprocessing_artifacts(
+            selector=res['selector'],
+            scaler=res['scaler'],
+            pca=res['pca'],
+            le=le,
+            save_dir=artifact_dir,
         )
 
-        # Logistic Regression confusion matrices
-        y_lr_pred = lr_model.predict(X_test)
-        plot_confusion_matrix(
-            y_test, y_lr_pred, class_names, normal_class_idx,
-            save_dir='assets', prefix='logreg_',
+    # --- Save experiment config for each model ---
+    configs = {
+        'HGB': ('HGB', args),
+        'XGBoost': ('XGBoost', args),
+        'LogReg': ('LogReg', args),
+    }
+    for name, (model_name, a) in configs.items():
+        cfg = build_model_config(
+            model_name=model_name,
+            mi_k=a.mi_k,
+            pca_variance=a.pca_variance,
+            n_splits=a.n_splits,
+            balancer=a.balancer,
+            k_neighbors=3,
         )
-
-        # Feature importance
-        plot_feature_importance(
-            xgb_model,
-            n_components=args.pca_components,
-            save_dir='assets',
-        )
+        save_experiment_config(cfg, save_dir="results/corrected_pipeline")
 
     print("\nPipeline complete.")
 

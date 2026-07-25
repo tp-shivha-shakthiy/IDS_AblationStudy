@@ -1,0 +1,3 @@
+Model,Binary Accuracy,Binary F1,Multiclass Accuracy,Macro F1,Weighted F1
+XGBoost,0.984762,0.943081,0.962359,0.451926,0.970062
+Logistic Regression,0.982075,0.933704,0.953530,0.370528,0.962589

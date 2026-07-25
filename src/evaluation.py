@@ -5,14 +5,18 @@ Output Layer — Evaluation, Visualisation & Results Persistence
 
 Provides:
   - plot_confusion_matrix()     binary and multi-class CM figures
+  - plot_roc_curve()            multi-class ROC curves
   - plot_feature_importance()   XGBoost feature-importance bar chart
-  - save_results()              write metrics.csv and model_comparison.csv
+  - save_results()              write metrics.csv, model_comparison.csv, per-class reports
+  - save_preprocessing_artifacts()  save MI selector, Scaler, PCA, LabelEncoder
   - print_final_summary()       formatted console table
 """
 
 import os
+import json
 import numpy as np
 import pandas as pd
+import joblib
 import matplotlib
 matplotlib.use('Agg')           # headless / non-interactive backend
 import matplotlib.pyplot as plt
@@ -20,7 +24,9 @@ import matplotlib.ticker as ticker
 from sklearn.metrics import (
     confusion_matrix, ConfusionMatrixDisplay,
     accuracy_score, f1_score, classification_report,
+    roc_curve, auc,
 )
+from sklearn.preprocessing import label_binarize
 
 
 # ---------------------------------------------------------------------------
@@ -31,21 +37,12 @@ def plot_confusion_matrix(
     y_true: np.ndarray,
     y_pred: np.ndarray,
     class_names: list,
-    normal_class_idx: int,
+    normal_class_idx: int = 0,
     save_dir: str = "assets",
     prefix: str = "",
 ) -> None:
     """
     Save both a binary and a multi-class confusion matrix to *save_dir*.
-
-    Parameters
-    ----------
-    y_true           : ground-truth multi-class labels
-    y_pred           : predicted multi-class labels
-    class_names      : list of str  (le.classes_)
-    normal_class_idx : int
-    save_dir         : directory for PNG output
-    prefix           : filename prefix  (e.g. "xgboost_")
     """
     os.makedirs(save_dir, exist_ok=True)
 
@@ -80,6 +77,81 @@ def plot_confusion_matrix(
 
 
 # ---------------------------------------------------------------------------
+# ROC Curve (multi-class)
+# ---------------------------------------------------------------------------
+
+def plot_roc_curve(
+    model,
+    X_test: np.ndarray,
+    y_test: np.ndarray,
+    class_names: list,
+    scaler=None,
+    pca=None,
+    title: str = "ROC Curve",
+    save_dir: str = "assets",
+    save_path: str = None,
+    prefix: str = "",
+) -> None:
+    """
+    Plot multi-class ROC curves (one-vs-rest).
+
+    If *scaler* and *pca* are provided, X_test is transformed through
+    them before calling predict_proba (needed when the model was trained
+    on scaled/PCA'd data but X_test is still in MI-selected space).
+    """
+    os.makedirs(save_dir, exist_ok=True)
+
+    X = X_test
+    if scaler is not None:
+        X = scaler.transform(X)
+    if pca is not None:
+        X = pca.transform(X)
+
+    classes = np.unique(y_test)
+    n_classes = len(classes)
+    y_bin = label_binarize(y_test, classes=classes)
+
+    try:
+        y_score = model.predict_proba(X)
+    except Exception:
+        print("  [plot_roc_curve] Model has no predict_proba — skipping.")
+        return
+
+    # Compute per-class ROC
+    fpr, tpr, roc_auc = {}, {}, {}
+    for i in range(n_classes):
+        fpr[i], tpr[i], _ = roc_curve(y_bin[:, i], y_score[:, i])
+        roc_auc[i] = auc(fpr[i], tpr[i])
+
+    # Weighted average AUC
+    weighted_auc = np.mean([roc_auc[i] for i in range(n_classes)])
+
+    # Plot
+    fig, ax = plt.subplots(figsize=(8, 6))
+    colors = plt.cm.tab10(np.linspace(0, 1, n_classes))
+    for i, (cls_name, color) in enumerate(zip(class_names, colors)):
+        ax.plot(fpr[i], tpr[i], color=color, lw=1.5,
+                label=f'{cls_name} (AUC={roc_auc[i]:.3f})')
+
+    ax.plot([0, 1], [0, 1], 'k--', lw=1, alpha=0.5)
+    ax.set_xlabel('False Positive Rate')
+    ax.set_ylabel('True Positive Rate')
+    ax.set_title(f"{title}  [Weighted AUC={weighted_auc:.3f}]")
+    ax.legend(loc='lower right', fontsize=8, ncol=2)
+    plt.tight_layout()
+
+    if save_path:
+        fig.savefig(save_path, dpi=150)
+        print(f"  Saved: {save_path}")
+    else:
+        path = os.path.join(save_dir, f"{prefix}roc_curve.png")
+        fig.savefig(path, dpi=150)
+        print(f"  Saved: {path}")
+
+    plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
 # Feature Importance (XGBoost)
 # ---------------------------------------------------------------------------
 
@@ -88,15 +160,7 @@ def plot_feature_importance(
     n_components: int = 10,
     save_dir: str = "assets",
 ) -> None:
-    """
-    Plot XGBoost feature importance scores for the PCA components.
-
-    Parameters
-    ----------
-    model        : fitted XGBClassifier
-    n_components : number of PCA components (x-axis labels)
-    save_dir     : output directory
-    """
+    """Plot XGBoost feature importance scores for the PCA components."""
     os.makedirs(save_dir, exist_ok=True)
 
     try:
@@ -127,12 +191,52 @@ def plot_feature_importance(
 
 
 # ---------------------------------------------------------------------------
+# Preprocessing Artifact Persistence
+# ---------------------------------------------------------------------------
+
+def save_preprocessing_artifacts(
+    selector=None,
+    scaler=None,
+    pca=None,
+    le=None,
+    save_dir: str = "artifacts",
+) -> None:
+    """
+    Save fitted preprocessing artifacts for inference reproducibility.
+
+    Saves: MI selector, StandardScaler, PCA, LabelEncoder.
+    """
+    os.makedirs(save_dir, exist_ok=True)
+
+    if selector is not None:
+        path = os.path.join(save_dir, "mi_selector.joblib")
+        joblib.dump(selector, path)
+
+    if scaler is not None:
+        path = os.path.join(save_dir, "scaler.joblib")
+        joblib.dump(scaler, path)
+
+    if pca is not None:
+        path = os.path.join(save_dir, "pca.joblib")
+        joblib.dump(pca, path)
+
+    if le is not None:
+        path = os.path.join(save_dir, "label_encoder.joblib")
+        joblib.dump(le, path)
+
+    print(f"  Preprocessing artifacts saved → {save_dir}/")
+
+
+# ---------------------------------------------------------------------------
 # Results Persistence
 # ---------------------------------------------------------------------------
 
 def save_results(
     all_test_results: list,
     cv_results: dict,
+    y_true: np.ndarray = None,
+    y_pred_dict: dict = None,
+    class_names: list = None,
     results_dir: str = "results",
 ) -> None:
     """
@@ -142,6 +246,9 @@ def save_results(
     ----------
     all_test_results : list of single-row DataFrames from each trainer
     cv_results       : dict  {'HGB': df, 'XGBoost': df, 'LogReg': df}
+    y_true           : ground truth labels for per-class reports (optional)
+    y_pred_dict      : dict  {'HGB': preds, 'XGBoost': preds, 'LogReg': preds}
+    class_names      : list of class names for per-class reports
     results_dir      : output directory
     """
     os.makedirs(results_dir, exist_ok=True)
@@ -164,6 +271,20 @@ def save_results(
         path = os.path.join(results_dir, "metrics.csv")
         metrics_df.to_csv(path, index=False, float_format='%.4f')
         print(f"  Saved: {path}")
+
+    # Per-class classification reports
+    if y_true is not None and y_pred_dict and class_names:
+        for model_name, y_pred in y_pred_dict.items():
+            report = classification_report(
+                y_true, y_pred, target_names=class_names,
+                output_dict=True, zero_division=0,
+            )
+            report_df = pd.DataFrame(report).transpose()
+            report_path = os.path.join(
+                results_dir, f"{model_name.lower()}_per_class_report.csv"
+            )
+            report_df.to_csv(report_path, float_format='%.4f')
+            print(f"  Saved: {report_path}")
 
 
 # ---------------------------------------------------------------------------
