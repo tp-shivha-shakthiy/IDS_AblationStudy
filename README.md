@@ -8,21 +8,26 @@ Implements the framework described in:
 
 ---
 
-## Key Results
+## Corrected Results (Leakage-Free Pipeline)
 
-| Model | Feature Selection | Sampling | Binary Acc | Binary F1 | Multi-class Acc | Macro F1 | Weighted F1 |
-|---|---|---|---|---|---|---|---|
-| **Bi-LSTM (Bidirectional)** | MI + PCA + Log | KMeansSMOTE | **99.04%** | **0.9552** | **98.08%** | 0.4725 | **0.9792** |
-| Bi-LSTM (Weighted) | MI + PCA + Log | KMeansSMOTE | 98.76% | 0.9531 | 96.72% | **0.4932** | 0.9730 |
-| XGBoost | MI + PCA + Log | KMeansSMOTE | 98.70% | 0.9542 | 96.49% | 0.3823 | 0.9592 |
-| XGBoost | Log + Raw Scaling | KMeansSMOTE | 98.49% | 0.9437 | 96.25% | 0.4544 | 0.9702 |
-| DNN | MI + PCA + Log | KMeansSMOTE | 98.54% | 0.9480 | 95.80% | 0.4589 | 0.9512 |
-| DNN (MI + PCA + KMeansSMOTE) | MI + PCA + Log | KMeansSMOTE | 98.52% | 0.9420 | 95.21% | 0.4362 | 0.9445 |
-| Logistic Regression | MI + PCA + Log | Standard SMOTE | 98.21% | 0.9337 | 95.35% | 0.3705 | 0.9626 |
+After eliminating data leakage (Scaler/PCA fit on full data, fold-0 retraining), corrected metrics on the locked 20% test set:
 
-**Bold** = best in column.
+| Model | Accuracy | Precision | Recall | Weighted F1 | AUC |
+|---|---|---|---|---|---|
+| **HGB** | **0.9628** | **0.9831** | **0.9628** | **0.9703** | **0.9975** |
+| XGBoost | 0.9122 | 0.9498 | 0.9122 | 0.9275 | 0.9834 |
+| Logistic Regression | 0.9545 | 0.9763 | 0.9545 | 0.9640 | 0.9922 |
 
-**Comparison with Kasina et al. (2026):** The paper reports 99.95% binary F1 and 97.92% weighted F1 using SMOTE-ENN + DNN. This implementation matches the weighted F1 (0.9792, Bi-LSTM) and improves Macro F1 through the Weighted Bi-LSTM configuration (0.4932 vs unreported in paper), reflecting stronger minority class detection on rare attack types (Worms, Shellcode, Analysis). The multi-task hierarchical DNN with shared feature extractor is an architectural addition not present in the original paper.
+### Legacy Results (Pre-Correction)
+
+The previous pipeline had known methodological issues (data leakage, fold-0 retraining). Preserved at `results/legacy_pipeline/` for reference only.
+
+| Model | Binary Acc | Binary F1 | Multi-class Acc | Macro F1 | Weighted F1 |
+|---|---|---|---|---|---|
+| XGBoost | 0.9848 | 0.9431 | 0.9624 | 0.4519 | 0.9701 |
+| Logistic Regression | 0.9821 | 0.9337 | 0.9535 | 0.3705 | 0.9626 |
+
+**Do not interpret accuracy decreases as model failures.** The legacy pipeline's inflated metrics were caused by preprocessing leakage.
 
 ---
 
@@ -31,120 +36,146 @@ Implements the framework described in:
 ```
 INTRUSION-DETECTION-SYSTEM/
 │
-├── main.py                              Pipeline orchestrator (sklearn models)
+├── main.py                              Tier 1 orchestrator (sklearn models)
 ├── requirements.txt
 │
-├── src/                                 Shared pipeline modules + sklearn trainers
+├── src/                                 Shared pipeline modules
 │   ├── preprocessing.py                 Load, clean, encode, log1p normalisation
 │   ├── feature_selection.py             Mutual Information (SelectKBest)
-│   ├── dimensionality_reduction.py      StandardScaler → PCA → 80/20 split
+│   ├── dimensionality_reduction.py      Stratified 80/20 split (no fitting)
 │   ├── balancing.py                     SMOTE / MiniBatchKMeans+SMOTE per fold
 │   ├── cross_validation.py              Shared stratified CV loop
+│   ├── dl_pipeline.py                   Shared DL infrastructure
 │   ├── evaluation.py                    Confusion matrices, CSV results, plots
-│   ├── train_hgb.py                     HistGradientBoostingClassifier (CV)
-│   ├── train_xgboost.py                 XGBoost (CV + blind holdout test)
-│   └── train_logistic.py                Logistic Regression (multinomial/saga)
+│   ├── experiment_config.py             Experiment metadata persistence
+│   ├── train_hgb.py                     HistGradientBoostingClassifier
+│   ├── train_xgboost.py                 XGBoost
+│   └── train_logistic.py                Logistic Regression
 │
-├── models/                              Self-contained deep learning training scripts
-│   ├── train_dnn.py                     PyTorch DNN with weighted cross-entropy
+├── models/                              Deep learning training scripts (Tier 2)
+│   ├── train_dnn.py                     DNN baseline (class-weight loss)
+│   ├── train_dnn_mi_pca_kmeans.py       DNN + MI + PCA + KMeansSMOTE
 │   ├── train_LSTM.py                    Bi-LSTM + MI + PCA + KMeansSMOTE
-│   ├── train_Bi-LSTM.py                 Weighted Bi-LSTM vs XGBoost dual pipeline
-│   ├── train_Bi-LSTM_shared-feature-extractor.py  Multi-task DNN (shared backbone, binary + multi-class heads)
-│   └── train_dnn_mi_pca_kmeans.py       4-layer DNN with MI, PCA, and KMeansSMOTE
+│   ├── train_Bi-LSTM.py                 Weighted Bi-LSTM + class-weight loss
+│   └── train_Bi-LSTM_shared-feature-extractor.py  Multi-task DNN (binary + multi-class heads)
+│
+├── tests/
+│   └── test_leakage.py                  40 tests: leakage verification + regression
 │
 ├── notebooks/
-│   └── Intrusion_Detection.ipynb        Exploratory notebook with full pipeline & results
+│   └── Intrusion_Detection.ipynb        Exploratory notebook
 │
 ├── data/
-│   ├── raw/                             Place UNSW-NB15_1.csv … UNSW-NB15_4.csv here
-│   └── processed/                       Reserved for cached intermediate arrays
+│   └── raw/                             Place UNSW-NB15_1.csv … UNSW-NB15_4.csv here
 │
 ├── assets/
 │   └── Architecture.jpeg                Pipeline architecture diagram
 │
-└── results/
-    └── model_comparison.xlsx            Blind holdout metrics (pre-generated)
+├── results/
+│   ├── legacy_pipeline/                 Historical benchmarks (pre-correction)
+│   ├── corrected_pipeline/              Current results + experiment configs
+│   └── comparison/                      Legacy vs corrected side-by-side
+│
+└── artifacts/                           Model + preprocessing artifacts (joblib)
+    ├── hgb/
+    ├── xgboost/
+    └── logistic_regression/
 ```
 
 ---
 
 ## Pipeline Flow
 
+### Tier 1: Classical ML (`main.py`)
+
 ```
 data/raw/UNSW-NB15_1..4.csv
          │
          ▼
 ┌──────────────────────────────┐
-│ Phase 3: Preprocessing       │  src/preprocessing.py
+│ Preprocessing                │  src/preprocessing.py
 │ - Load 4 CSVs, concatenate   │
 │ - Clean targets → LabelEncode│
 │ - Drop metadata cols          │
 │ - Encode categorical features │
-│ - Log1p normalization         │
+│ - Log1p normalisation         │
 └──────────────┬───────────────┘
                │
                ▼
 ┌──────────────────────────────┐
-│ Phase 4a: MI Feature Sel.    │  src/feature_selection.py
-│ - 5% stratified sample       │
-│ - SelectKBest (top-k)        │
+│ Stratified 80/20 Split       │  src/dimensionality_reduction.py
+│ - NO transformers fitted     │
+│ - Locked test set created    │
 └──────────────┬───────────────┘
                │
-               ▼
-┌──────────────────────────────┐
-│ Phase 4b+5: PCA + Split      │  src/dimensionality_reduction.py
-│ - StandardScaler             │
-│ - PCA (n components)         │
-│ - 80/20 stratified split     │
-└──────────────┬───────────────┘
-               │
-               ▼
-┌──────────────────────────────┐
-│ Phase 6: CV + Balancing      │  src/balancing.py
-│ - StratifiedKFold (5 folds)  │
-│ - SMOTE or KMeans+SMOTE      │
-└──────────────┬───────────────┘
-               │
-        ┌──────┴────────┐
-        ▼                ▼           ▼
-┌──────────────┐ ┌────────────┐ ┌──────────────┐
-│ HGB (CV)     │ │ XGBoost    │ │ LogisticReg  │
-│ Phase 7      │ │ CV+Test    │ │ Phase 10     │
-│              │ │ Phase 8+9  │ │              │
-└──────┬───────┘ └──────┬─────┘ └──────┬───────┘
-       └────────────────┼──────────────┘
-                        ▼
-               ┌──────────────────┐
-               │ Evaluation       │  src/evaluation.py
-               │ - Confusion mats │
-               │ - Feature import │
-               │ - CSV results    │
-               └──────────────────┘
+     ┌─────────┴──────────┐
+     ▼                    ▼
+┌──────────────┐   ┌──────────────┐
+│ Per-Fold CV  │   │ Final Retrain│
+│ (5 folds)    │   │ (full 80%)   │
+│              │   │              │
+│ MI → fit     │   │ MI → fit     │
+│ Scaler → fit │   │ Scaler → fit │
+│ PCA → fit    │   │ PCA → fit    │
+│ SMOTE only   │   │ SMOTE only   │
+│ on train     │   │ on train     │
+│ → train      │   │ → retrain    │
+│ → eval val   │   │ → eval test  │
+└──────┬───────┘   └──────┬───────┘
+       │                  │
+       └────────┬─────────┘
+                ▼
+     ┌─────────────────────┐
+     │ Single test eval    │  locked 20% set
+     │ on locked test set  │
+     └─────────────────────┘
 ```
 
-The sklearn models (HGB, XGBoost, Logistic Regression) run through the shared pipeline via `main.py`. The deep learning models are self-contained scripts with their own preprocessing, feature selection, and balancing built in.
+**Critical invariants (no data leakage):**
+- MI selection is fitted on fold-train / full-train only
+- StandardScaler is fitted on fold-train / full-train only
+- PCA is fitted on fold-train / full-train only
+- K-means SMOTE is applied to fold-train / full-train only — never val or test
+- Test set is locked and never touched until final evaluation
+- Final model is retrained on the COMPLETE 80% training set, not a CV fold
+
+### Tier 2: Deep Learning (`models/*.py`)
+
+DL scripts use shared infrastructure from `src/dl_pipeline.py`:
+
+```
+src/dl_pipeline.py
+├── load_data()              preprocessing + 80/20 split
+├── preprocess_fold()        per-fold MI → Scaler → PCA → KMeansSMOTE
+├── preprocess_final()       full-train preprocessing for final retrain
+├── evaluate_predictions()   binary + multiclass metrics
+├── save_dl_artifacts()      model weights + metrics + confusion matrix
+└── set_seeds() / get_device()  reproducibility
+```
+
+Each DL script follows the same leakage-free protocol as Tier 1.
 
 ---
 
 ## Models
 
-### Sklearn models (`main.py`)
+### Tier 1 — Classical ML (`src/`)
 
-| Model | File | Notes |
+| Model | File | Hyperparameters |
 |---|---|---|
-| HistGradientBoostingClassifier | `models/train_hgb.py` | LightGBM-style binning, 5-fold CV |
-| XGBoost | `models/train_xgboost.py` | CV + blind 20% holdout evaluation |
-| Logistic Regression | `models/train_logistic.py` | Multinomial, saga solver, CV + test |
+| HistGradientBoosting | `src/train_hgb.py` | max_iter=30, lr=0.05, max_depth=5, l2=1.0 |
+| XGBoost | `src/train_xgboost.py` | n_estimators=30, subsample=0.1, max_depth=3, colsample=0.1 |
+| Logistic Regression | `src/train_logistic.py` | solver=saga, multi_class=multinomial, max_iter=50 |
 
-### Deep learning models (self-contained PyTorch scripts)
+### Tier 2 — Deep Learning (`models/`)
 
-| Script | Architecture | Preprocessing | Balancing |
-|---|---|---|---|
-| `train_dnn.py` | 3-layer DNN (64→32→n) with BatchNorm, Dropout | Log1p only | Weighted loss per fold |
-| `train_LSTM.py` | Bidirectional LSTM (hidden=32) | MI top-30 → PCA 15 | RandomUnderSampler + KMeansSMOTE |
-| `train_Bi-LSTM.py` | Weighted Bi-LSTM + XGBoost dual pipeline | MI top-30 → PCA 15 | KMeansSMOTE |
-| `train_Bi-LSTM_shared-feature-extractor.py` | Multi-task DNN: shared backbone (128→64), binary + multi-class heads, joint 40/60 loss | MI top-30 → PCA 15 | None |
-| `train_dnn_mi_pca_kmeans.py` | 4-layer DNN (128→64→32→n) with BatchNorm, Dropout | MI top-30 → PCA 15 | RandomUnderSampler + KMeansSMOTE |
+| Script | Architecture | Preprocessing |
+|---|---|---|
+| `train_dnn.py` | 2-layer DNN (64→32) + BatchNorm + Dropout(0.1) | Scaler only, class-weight loss |
+| `train_dnn_mi_pca_kmeans.py` | 3-layer DNN (128→64→32) + BatchNorm + Dropout(0.2) | MI(30) → PCA(15) → RUS + KMeansSMOTE |
+| `train_LSTM.py` | Bi-LSTM (hidden=32, 1 layer) + FC(32→out) | MI(30) → PCA(15) → RUS + KMeansSMOTE |
+| `train_Bi-LSTM.py` | Weighted Bi-LSTM (hidden=32) + FC(32→out) | MI(30) → PCA(15) → RUS + KMeansSMOTE, class weights |
+| `train_Bi-LSTM_shared-feature-extractor.py` | Multi-task DNN: shared backbone (128→64), binary head + multi-class head, joint loss (0.4/0.6) | MI(30) → PCA(15) → RUS + KMeansSMOTE |
 
 ---
 
@@ -153,11 +184,7 @@ The sklearn models (HGB, XGBoost, Logistic Regression) run through the shared pi
 ### 1. Install dependencies
 ```bash
 pip install -r requirements.txt
-```
-
-The DL scripts require PyTorch, which is not in `requirements.txt`. Install separately:
-```bash
-pip install torch
+pip install torch    # required for DL models
 ```
 
 ### 2. Download the dataset
@@ -171,31 +198,49 @@ data/raw/UNSW-NB15_3.csv
 data/raw/UNSW-NB15_4.csv
 ```
 
-### 3. Run the sklearn pipeline
+### 3. Run Tier 1 (sklearn models)
 ```bash
 python main.py
 ```
 
-### 4. Run a deep learning model
+### 4. Run Tier 2 (DL models)
+
+Each model runs independently:
+
 ```bash
 python models/train_dnn.py
+python models/train_dnn_mi_pca_kmeans.py
 python models/train_LSTM.py
-python models/train_Bi-LSTM_shared-feature-extractor.py
+python "models/train_Bi-LSTM.py"
+python "models/train_Bi-LSTM_shared-feature-extractor.py"
 ```
 
-### 5. Pipeline options (`main.py`)
+All DL scripts accept `--data-dir` for custom data paths:
+
+```bash
+python models/train_dnn.py --data-dir /path/to/data/raw
+```
+
+### 5. Run the test suite
+```bash
+python -m pytest tests/test_leakage.py -v
+```
+
+---
+
+## Pipeline Options (`main.py`)
 
 | Flag | Default | Description |
 |---|---|---|
 | `--data-dir` | `data/raw` | Path to raw CSV files |
-| `--balancer` | `smote` | Balancing strategy: `smote` or `kmeans` |
+| `--balancer` | `kmeans` | Balancing strategy: `kmeans` or `smote` |
 | `--n-splits` | `5` | Number of CV folds |
-| `--mi-k` | `15` | Top-k MI features to retain |
-| `--pca-components` | `10` | PCA output dimensions |
+| `--mi-k` | `15` | Top-k MI features to retain per fold |
+| `--pca-variance` | `0.95` | Cumulative PCA variance to retain |
 | `--skip-plots` | off | Skip saving confusion matrix PNGs |
 
 ```bash
-python main.py --balancer kmeans --pca-components 12 --skip-plots
+python main.py --balancer smote --mi-k 20 --skip-plots
 ```
 
 ---
@@ -225,39 +270,65 @@ python main.py --balancer kmeans --pca-components 12 --skip-plots
 
 The dataset is heavily imbalanced — the Worms class has only **~111 samples** out of approximately **~2.5M rows**. The pipeline handles this with:
 
-- **Default (SMOTE):** Applied inside each CV fold with `k_neighbors=3` to avoid data leakage. Handles ultra-minority classes safely.
-- **KMeans+SMOTE:** Uses MiniBatchKMeans for safe-zone discovery + SMOTE. May raise `RuntimeError` on extreme minority classes like Worms.
+- **K-means SMOTE (default):** MiniBatchKMeans cluster pre-processing + SMOTE, applied inside each CV fold or on the full training set for final retrain.
+- **Standard SMOTE:** `--balancer smote` flag, `k_neighbors=3`.
+- **DL models:** RandomUnderSampler (cap 15,000) + KMeansSMOTE (`k_neighbors=2`), or class-weighted loss functions.
 
-Pass `--balancer kmeans` to use the KMeans hybrid variant.
-
-DL models use class-weighted loss functions or RandomUnderSampler + KMeansSMOTE combinations.
+Balancing is applied **only to training data** — validation and test sets are never balanced.
 
 ---
 
-## Evaluation Metrics
+## Evaluation
 
-All models report 5 metrics for both CV folds and blind holdout:
+### Metrics
+
+All models report:
 
 | Metric | Description |
 |---|---|
-| Binary Accuracy | Normal vs Attack (derived from multi-class predictions) |
-| Binary F1 | F1-score for binary detection |
-| Multi-class Accuracy | Accuracy across all 10 attack categories |
-| Macro F1 | Unweighted mean F1 across classes (sensitive to minority performance) |
-| Weighted F1 | Support-weighted mean F1 across classes |
+| Accuracy | Overall classification accuracy |
+| Precision | Support-weighted precision |
+| Recall | Support-weighted recall |
+| Weighted F1 | Support-weighted F1 across classes |
+| AUC | One-vs-rest weighted AUC |
 
----
+Per-class precision, recall, and F1 are saved to `results/corrected_pipeline/*_per_class_report.csv`.
 
-## Results
-
-Generated outputs:
+### Output Files
 
 | Path | Description |
 |---|---|
-| `results/model_comparison.csv` | Blind holdout metrics for all sklearn models |
-| `results/metrics.csv` | Per-fold CV metrics for all sklearn models |
-| `results/model_comparison.xlsx` | Pre-generated blind holdout metrics (git-committed) |
-| `assets/` | Confusion matrix PNGs + XGBoost feature importance plot |
+| `results/corrected_pipeline/model_comparison.csv` | Blind test metrics for all models |
+| `results/corrected_pipeline/metrics.csv` | Per-fold CV metrics |
+| `results/corrected_pipeline/experiment_config.json` | Pipeline parameters + timestamps |
+| `results/corrected_pipeline/*_per_class_report.csv` | Per-class classification reports |
+| `results/legacy_pipeline/` | Historical benchmarks |
+| `results/comparison/legacy_vs_corrected.csv` | Side-by-side comparison |
+| `artifacts/*/model.joblib` | Trained model files |
+| `artifacts/*/scaler.joblib` | Fitted StandardScaler |
+| `artifacts/*/pca.joblib` | Fitted PCA |
+| `artifacts/*/mi_selector.joblib` | Fitted MI selector |
+
+---
+
+## Testing
+
+The test suite (`tests/test_leakage.py`) contains 40 tests verifying:
+
+- StandardScaler fitted on training data only
+- PCA fitted on training data only
+- MI feature selection fitted on training data only
+- K-means SMOTE applied to training data only
+- Test data never used during preprocessing fitting
+- 80/20 split is stratified and reproducible
+- Per-fold CV transformers are independently fitted
+- DL pipeline (`dl_pipeline.py`) preprocessing is leakage-free
+- Final retraining uses the full 80% training set (not a CV fold)
+- Test data never enters any balancing function
+
+```bash
+python -m pytest tests/test_leakage.py -v
+```
 
 ---
 

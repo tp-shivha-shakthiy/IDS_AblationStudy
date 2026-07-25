@@ -1,11 +1,10 @@
-Model,Metric,Legacy,Corrected,Difference
-XGBoost,Binary Accuracy,0.984762,PENDING,-
-XGBoost,Binary F1,0.943081,PENDING,-
-XGBoost,Multiclass Accuracy,0.962359,PENDING,-
-XGBoost,Macro F1,0.451926,PENDING,-
-XGBoost,Weighted F1,0.970062,PENDING,-
-Logistic Regression,Binary Accuracy,0.982075,PENDING,-
-Logistic Regression,Binary F1,0.933704,PENDING,-
-Logistic Regression,Multiclass Accuracy,0.953530,PENDING,-
-Logistic Regression,Macro F1,0.370528,PENDING,-
-Logistic Regression,Weighted F1,0.962589,PENDING,-
+Model,Metric,Legacy (Pre-Correction),Corrected (Post-Correction),Notes
+XGBoost,Multiclass Accuracy,0.962359,0.9122,-0.0502 (expected: leakage inflated legacy)
+XGBoost,Weighted F1,0.970062,0.9275,-0.0426
+XGBoost,Macro F1,0.451926,N/A,Legacy Macro F1 not directly comparable
+XGBoost,AUC,N/A,0.9834,Not reported in legacy
+Logistic Regression,Multiclass Accuracy,0.953530,0.9545,+0.0010
+Logistic Regression,Weighted F1,0.962589,0.9640,+0.0014
+Logistic Regression,Macro F1,0.370528,N/A,Legacy Macro F1 not directly comparable
+Logistic Regression,AUC,N/A,0.9922,Not reported in legacy
+HGB,N/A,N/A,0.9628 (acc) / 0.9703 (f1) / 0.9975 (auc),No legacy baseline available
