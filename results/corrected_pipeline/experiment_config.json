@@ -1,0 +1,27 @@
+{
+  "model": "LogReg",
+  "seed": 42,
+  "train_test_split": "80/20",
+  "test_size": 0.2,
+  "cv_folds": 5,
+  "balancer": "kmeans",
+  "balancer_k_neighbors": 3,
+  "feature_selection": "mutual_information",
+  "feature_selection_scope": "per_fold_training_data",
+  "feature_selection_k": 15,
+  "pca_variance": 0.95,
+  "scaler": "StandardScaler",
+  "scaler_scope": "per_fold_training_data",
+  "pca_scope": "per_fold_training_data",
+  "test_set_locked": true,
+  "final_retrain": "full_80_percent_training_set",
+  "timestamp": "2026-07-25T16:02:18.390683",
+  "git_commit": "6e4ba9f88905b226c45ec07ec9c6cef3541400d5",
+  "model_hyperparameters": {
+    "multi_class": "multinomial",
+    "solver": "saga",
+    "max_iter": 50,
+    "random_state": 42,
+    "n_jobs": -1
+  }
+}
