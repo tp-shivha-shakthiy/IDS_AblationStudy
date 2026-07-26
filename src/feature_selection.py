@@ -1,14 +1,17 @@
 """
 feature_selection.py
 ====================
-Phase 4a -- Mutual Information Feature Selection
+Mutual Information Feature Selection — Shared by Tier 1 and Tier 2.
 
-Fits a SelectKBest selector using Mutual Information scores on a
-stratified sample of the provided data.  The caller MUST pass only
-training data to avoid leakage.
+Single source of truth for all MI-based feature selection.
 
-The returned *selector* can later be used with
-``apply_feature_selection`` to transform any split without refitting.
+Provides:
+  fit_mi_selector(X, y, k, sample_frac, random_state)
+      Fit MI on the full data (optionally via stratified sampling).
+      Used by Tier 1 trainers for final retrain and by Tier 2 scripts.
+
+  apply_feature_selection(X, selector)
+      Apply a fitted selector to transform new data without refitting.
 """
 
 import numpy as np
@@ -17,50 +20,45 @@ from sklearn.feature_selection import mutual_info_classif, SelectKBest
 from sklearn.model_selection import train_test_split
 
 
-def select_features(
+def fit_mi_selector(
     X: np.ndarray,
     y: np.ndarray,
     k: int = 15,
-    sample_frac: float = 0.05,
+    sample_frac: float = 0.0,
     random_state: int = 42,
-) -> tuple:
+) -> SelectKBest:
     """
-    Fit MI feature selection on the supplied data and transform it.
+    Fit a SelectKBest selector using Mutual Information scores.
 
     Parameters
     ----------
     X            : float32 array  (N, F)   preprocessed feature matrix
     y            : int array      (N,)     encoded labels
     k            : int            number of features to keep (default 15)
-    sample_frac  : float          fraction of data used to fit MI scores
+    sample_frac  : float          if > 0, fit MI on a stratified sample
+                                 (faster for very large datasets)
     random_state : int
 
     Returns
     -------
-    X_mi     : np.ndarray  (N, k)    reduced feature matrix
-    selector : SelectKBest           fitted selector
+    selector : SelectKBest  fitted on the (possibly sampled) data
     """
-    print("=== Phase 4a: Mutual Information Feature Selection ===")
+    if sample_frac > 0 and sample_frac < 1.0:
+        X_fit, _, y_fit, _ = train_test_split(
+            X, y, train_size=sample_frac, stratify=y,
+            random_state=random_state,
+        )
+    else:
+        X_fit, y_fit = X, y
 
-    # Draw a stratified sample to estimate MI scores without RAM exhaustion
-    X_sample, _, y_sample, _ = train_test_split(
-        X, y,
-        train_size=sample_frac,
-        stratify=y,
-        random_state=random_state,
-    )
+    selector = SelectKBest(score_func=mutual_info_classif, k=min(k, X_fit.shape[1]))
+    selector.fit(X_fit, y_fit)
 
-    print(f"  Computing MI scores on {X_sample.shape[0]:,} samples "
-          f"({sample_frac*100:.0f}% of data) ...")
+    if sample_frac > 0 and sample_frac < 1.0:
+        del X_fit, y_fit
+        gc.collect()
 
-    selector = SelectKBest(score_func=mutual_info_classif, k=k)
-    selector.fit(X_sample, y_sample)
-
-    del X_sample, y_sample; gc.collect()
-
-    X_mi = selector.transform(X)
-    print(f"  Top {k} features selected. Reduced shape: {X_mi.shape}")
-    return X_mi, selector
+    return selector
 
 
 def apply_feature_selection(

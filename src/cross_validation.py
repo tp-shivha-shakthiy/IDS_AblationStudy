@@ -27,11 +27,11 @@ import warnings
 from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
-from sklearn.feature_selection import mutual_info_classif, SelectKBest
 from sklearn.metrics import (precision_score, recall_score, f1_score,
                              accuracy_score, roc_auc_score)
 
 from src.balancing import balance_training_fold
+from src.feature_selection import fit_mi_selector
 
 
 # ===================================================================
@@ -148,8 +148,7 @@ def run_cv(
         y_tr, y_val = y_train[trn_idx], y_train[val_idx]
 
         # --- 1. MI Feature Selection fitted on fold train only ---
-        fold_selector = SelectKBest(score_func=mutual_info_classif, k=mi_k)
-        fold_selector.fit(X_tr, y_tr)
+        fold_selector = fit_mi_selector(X_tr, y_tr, k=mi_k, random_state=random_state)
         X_tr_mi = fold_selector.transform(X_tr)
         X_val_mi = fold_selector.transform(X_val)
 

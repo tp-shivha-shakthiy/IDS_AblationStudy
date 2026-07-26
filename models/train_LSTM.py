@@ -21,8 +21,9 @@ from sklearn.model_selection import StratifiedKFold
 from src.dl_pipeline import (
     set_seeds, get_device, load_data,
     preprocess_fold, preprocess_final,
-    evaluate_predictions, save_dl_artifacts,
+    evaluate_with_proba, get_probabilities, save_dl_artifacts,
 )
+from src.experiment_config import build_experiment_config
 
 set_seeds(42)
 device = get_device()
@@ -92,6 +93,7 @@ def main(data_dir="data/raw"):
 
         train_loader = DataLoader(
             TensorDataset(X_tr_t, y_tr_t), batch_size=512, shuffle=True,
+            drop_last=True,
         )
 
         model = BiLSTMNetwork(fold_data['X_tr'].shape[1], num_classes).to(device)
@@ -111,7 +113,8 @@ def main(data_dir="data/raw"):
         with torch.no_grad():
             preds = torch.argmax(model(X_val_t.to(device)), dim=1).cpu().numpy()
 
-        metrics = evaluate_predictions(y_val, preds, normal_class_idx)
+        val_proba = get_probabilities(model, fold_data['X_val'], device)
+        metrics = evaluate_with_proba(y_val, preds, val_proba, normal_class_idx)
         metrics['fold'] = fold
         cv_metrics.append(metrics)
         print(f"    Acc={metrics['multi_acc']:.4f}  F1={metrics['weighted_f1']:.4f}")
@@ -130,6 +133,7 @@ def main(data_dir="data/raw"):
 
     train_loader = DataLoader(
         TensorDataset(X_tr_t, y_tr_t), batch_size=512, shuffle=True,
+        drop_last=True,
     )
 
     final_model = BiLSTMNetwork(final_data['X_train'].shape[1], num_classes).to(device)
@@ -150,7 +154,8 @@ def main(data_dir="data/raw"):
     with torch.no_grad():
         test_preds = torch.argmax(final_model(X_te_t.to(device)), dim=1).cpu().numpy()
 
-    test_metrics = evaluate_predictions(y_test, test_preds, normal_class_idx)
+    test_proba = get_probabilities(final_model, final_data['X_test'], device)
+    test_metrics = evaluate_with_proba(y_test, test_preds, test_proba, normal_class_idx)
 
     print(f"\n  {MODEL_NAME} Test Metrics:")
     for k, v in test_metrics.items():
@@ -164,6 +169,19 @@ def main(data_dir="data/raw"):
         class_names=class_names,
         normal_class_idx=normal_class_idx,
         y_test=y_test, y_test_pred=test_preds,
+        selector=final_data['selector'],
+        scaler=final_data['scaler'],
+        pca=final_data['pca'],
+        le=data['le'],
+        config=build_experiment_config(
+            model_name=MODEL_NAME,
+            model_params={"hidden_dim": 32, "dropout": 0.2,
+                          "lr": 0.005, "weight_decay": 1e-4,
+                          "epochs": 5, "batch_size": 512},
+            mi_k=30, pca_variance=None, tier=2,
+            dl_extra={"preprocessing": ["MI_k30", "StandardScaler", "PCA_15", "KMeansSMOTE"],
+                      "balance_strategy": "kmeans"},
+        ),
     )
 
     return final_model, cv_metrics, test_metrics

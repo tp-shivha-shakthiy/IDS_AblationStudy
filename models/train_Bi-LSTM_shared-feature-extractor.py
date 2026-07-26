@@ -25,8 +25,9 @@ from sklearn.model_selection import StratifiedKFold
 from src.dl_pipeline import (
     set_seeds, get_device, load_data,
     preprocess_fold, preprocess_final,
-    evaluate_predictions, save_dl_artifacts,
+    evaluate_with_proba, save_dl_artifacts,
 )
+from src.experiment_config import build_experiment_config
 
 set_seeds(42)
 device = get_device()
@@ -109,6 +110,7 @@ def main(data_dir="data/raw"):
         train_loader = DataLoader(
             TensorDataset(X_tr_t, y_tr_t, y_tr_bin_t),
             batch_size=512, shuffle=True,
+            drop_last=True,
         )
 
         model = MultiTaskHierarchicalDNN(
@@ -135,8 +137,9 @@ def main(data_dir="data/raw"):
         with torch.no_grad():
             bin_out, multi_out = model(X_val_t.to(device))
             preds_multi = torch.argmax(multi_out, dim=1).cpu().numpy()
+            val_proba = torch.softmax(multi_out, dim=1).cpu().numpy()
 
-        metrics = evaluate_predictions(y_val, preds_multi, normal_class_idx)
+        metrics = evaluate_with_proba(y_val, preds_multi, val_proba, normal_class_idx)
         metrics['fold'] = fold
         cv_metrics.append(metrics)
         print(f"    Acc={metrics['multi_acc']:.4f}  F1={metrics['weighted_f1']:.4f}")
@@ -159,6 +162,7 @@ def main(data_dir="data/raw"):
     train_loader = DataLoader(
         TensorDataset(X_tr_t, y_tr_t, y_tr_bin_t),
         batch_size=512, shuffle=True,
+        drop_last=True,
     )
 
     final_model = MultiTaskHierarchicalDNN(
@@ -186,8 +190,9 @@ def main(data_dir="data/raw"):
     with torch.no_grad():
         _, multi_out = final_model(X_te_t.to(device))
         test_preds = torch.argmax(multi_out, dim=1).cpu().numpy()
+        test_proba = torch.softmax(multi_out, dim=1).cpu().numpy()
 
-    test_metrics = evaluate_predictions(y_test, test_preds, normal_class_idx)
+    test_metrics = evaluate_with_proba(y_test, test_preds, test_proba, normal_class_idx)
 
     print(f"\n  {MODEL_NAME} Test Metrics:")
     for k, v in test_metrics.items():
@@ -201,6 +206,21 @@ def main(data_dir="data/raw"):
         class_names=class_names,
         normal_class_idx=normal_class_idx,
         y_test=y_test, y_test_pred=test_preds,
+        selector=final_data['selector'],
+        scaler=final_data['scaler'],
+        pca=final_data['pca'],
+        le=data['le'],
+        config=build_experiment_config(
+            model_name=MODEL_NAME,
+            model_params={"shared_layers": [128, 64], "binary_head": 2,
+                          "multi_head": [32], "dropout": 0.2,
+                          "lr": 0.005, "weight_decay": 1e-4,
+                          "epochs": 8, "batch_size": 512,
+                          "loss_weights": {"binary": 0.4, "multi": 0.6}},
+            mi_k=30, pca_variance=None, tier=2,
+            dl_extra={"preprocessing": ["MI_k30", "StandardScaler", "PCA_15", "KMeansSMOTE"],
+                      "balance_strategy": "kmeans"},
+        ),
     )
 
     return final_model, cv_metrics, test_metrics

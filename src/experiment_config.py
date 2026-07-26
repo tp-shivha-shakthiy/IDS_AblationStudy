@@ -41,21 +41,27 @@ def build_experiment_config(
     k_neighbors: int = 3,
     random_state: int = 42,
     test_size: float = 0.20,
+    tier: int = 1,
+    dl_extra: dict = None,
 ) -> dict:
     """
-    Build an experiment configuration dict.
+    Build an experiment configuration dict with a unified schema.
+
+    Works for both Tier 1 (classical ML) and Tier 2 (DL) models.
 
     Parameters
     ----------
-    model_name    : str   e.g. "XGBoost", "LogReg", "HGB"
+    model_name    : str   e.g. "XGBoost", "DNN", "LSTM"
     model_params  : dict  model-specific hyperparameters
     mi_k          : int   MI top-k features
-    pca_variance  : float cumulative PCA variance
+    pca_variance  : float cumulative PCA variance (Tier 1) or None (Tier 2)
     n_splits      : int   CV folds
     balancer      : str   balancing strategy
     k_neighbors   : int   SMOTE k_neighbors
     random_state  : int
     test_size     : float holdout fraction
+    tier          : int   1 or 2
+    dl_extra      : dict  DL-specific fields (architecture, epochs, lr, etc.)
 
     Returns
     -------
@@ -63,6 +69,7 @@ def build_experiment_config(
     """
     config = {
         "model": model_name,
+        "tier": tier,
         "seed": random_state,
         "train_test_split": f"{int((1 - test_size) * 100)}/{int(test_size * 100)}",
         "test_size": test_size,
@@ -72,18 +79,23 @@ def build_experiment_config(
         "feature_selection": "mutual_information",
         "feature_selection_scope": "per_fold_training_data",
         "feature_selection_k": mi_k,
-        "pca_variance": pca_variance,
         "scaler": "StandardScaler",
         "scaler_scope": "per_fold_training_data",
-        "pca_scope": "per_fold_training_data",
         "test_set_locked": True,
         "final_retrain": "full_80_percent_training_set",
         "timestamp": datetime.datetime.now().isoformat(),
         "git_commit": get_git_commit(),
     }
 
+    if pca_variance is not None:
+        config["pca_variance"] = pca_variance
+        config["pca_scope"] = "per_fold_training_data"
+
     if model_params:
         config["model_hyperparameters"] = model_params
+
+    if dl_extra:
+        config["dl_extra"] = dl_extra
 
     return config
 

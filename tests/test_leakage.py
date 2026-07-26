@@ -15,6 +15,7 @@ Tests:
 
 import numpy as np
 import pytest
+import torch
 from collections import Counter
 from unittest.mock import patch
 
@@ -36,6 +37,14 @@ from src.balancing import balance_training_fold, balance_full_train
 @pytest.fixture
 def synthetic_dataset():
     """Create a small reproducible dataset for testing."""
+    rng = np.random.RandomState(42)
+    X = rng.randn(1000, 20).astype(np.float32)
+    y = rng.choice([0, 1, 2, 3, 4], size=1000, p=[0.5, 0.15, 0.1, 0.15, 0.1])
+    return X, y
+
+
+def synthetic_dataset_small():
+    """Small dataset usable outside pytest fixtures (e.g. in patch mocks)."""
     rng = np.random.RandomState(42)
     X = rng.randn(1000, 20).astype(np.float32)
     y = rng.choice([0, 1, 2, 3, 4], size=1000, p=[0.5, 0.15, 0.1, 0.15, 0.1])
@@ -390,6 +399,54 @@ class TestBalancingAPI:
         for k, v in cv_metrics.items():
             assert len(v) == 3
 
+    def test_kmeans_strategy_uses_actual_kmeans_smote(self):
+        """strategy='kmeans' must use imblearn KMeansSMOTE, not MiniBatchKMeans."""
+        from src.balancing import balance_training_fold
+        from imblearn.over_sampling import KMeansSMOTE
+
+        X, y = synthetic_dataset_small()
+        with patch('src.balancing.KMeansSMOTE') as mock_kms:
+            mock_kms.return_value.fit_resample.return_value = (X, y)
+            balance_training_fold(
+                X, y, strategy="kmeans", k_neighbors=2,
+                n_clusters=5, random_state=42,
+            )
+            mock_kms.assert_called_once()
+
+    def test_kmeans_strategy_floors_k_neighbors_at_1(self):
+        """k_neighbors must be floored at 1 to avoid ValueError."""
+        from src.balancing import balance_training_fold
+
+        # Binary dataset: minority class has 5 samples.
+        # k_neighbors=100 should be clamped to max(min(100, 5-1), 1) = 4
+        rng = np.random.RandomState(42)
+        X_maj = rng.randn(200, 5).astype(np.float32)
+        X_min = rng.randn(5, 5).astype(np.float32) + 2
+        X = np.vstack([X_maj, X_min])
+        y = np.array([0]*200 + [1]*5)
+
+        with patch('src.balancing.KMeansSMOTE') as mock_kms:
+            mock_kms.return_value.fit_resample.return_value = (X, y)
+            balance_training_fold(
+                X, y, strategy="kmeans", k_neighbors=100,
+                n_clusters=3, random_state=42,
+            )
+            call_kwargs = mock_kms.call_args[1]
+            assert call_kwargs['k_neighbors'] == 4, (
+                f"Expected floor of 4, got {call_kwargs['k_neighbors']}"
+            )
+
+    def test_smote_strategy_floors_k_neighbors_at_1(self):
+        """k_neighbors must be floored at 1 for SMOTE strategy too."""
+        from src.balancing import balance_training_fold
+
+        X, y = synthetic_dataset_small()
+        X_bal, y_bal = balance_training_fold(
+            X, y, strategy="smote", k_neighbors=100,
+            random_state=42,
+        )
+        assert len(X_bal) >= len(X)
+
 
 # ---------------------------------------------------------------------------
 # Test 8: DL pipeline (dl_pipeline.py) — no leakage
@@ -605,6 +662,84 @@ class TestDLPipelineNoLeakage:
                      'weighted_f1', 'precision', 'recall', 'auc']:
             assert key in metrics, f"Missing metric: {key}"
 
+    def test_evaluate_with_proba_returns_valid_auc(self):
+        """evaluate_with_proba must return AUC > 0 for good predictions."""
+        from src.dl_pipeline import evaluate_with_proba
+        from sklearn.preprocessing import label_binarize
+
+        rng = np.random.RandomState(42)
+        y_true = np.array([0, 1, 2, 0, 1, 2, 0, 1, 2, 0])
+        n_classes = 3
+        # Build probabilities that mostly agree with y_true
+        y_proba = rng.dirichlet(np.ones(n_classes), size=len(y_true))
+        for i, c in enumerate(y_true):
+            y_proba[i, c] += 2.0
+        y_proba = y_proba / y_proba.sum(axis=1, keepdims=True)
+        y_pred = np.argmax(y_proba, axis=1)
+
+        metrics = evaluate_with_proba(y_true, y_pred, y_proba, normal_class_idx=0)
+        assert metrics['auc'] > 0.5, f"AUC too low: {metrics['auc']}"
+
+    def test_evaluate_with_proba_keys_match_evaluate_predictions(self):
+        """evaluate_with_proba must return the same keys as evaluate_predictions."""
+        from src.dl_pipeline import evaluate_predictions, evaluate_with_proba
+
+        y_true = np.array([0, 1, 2, 0, 1])
+        y_pred = np.array([0, 1, 2, 0, 2])
+        rng = np.random.RandomState(42)
+        y_proba = rng.dirichlet(np.ones(3), size=5)
+
+        keys_pred = set(evaluate_predictions(y_true, y_pred).keys())
+        keys_proba = set(evaluate_with_proba(y_true, y_pred, y_proba).keys())
+        assert keys_proba == keys_pred
+
+
+class TestGetProbabilities:
+    def test_returns_correct_shape(self):
+        """get_probabilities must return (N, num_classes) array."""
+        from src.dl_pipeline import get_probabilities, set_seeds
+        import torch.nn as nn
+
+        set_seeds(42)
+        device = torch.device('cpu')
+        input_dim, num_classes = 10, 3
+        model = nn.Linear(input_dim, num_classes)
+
+        X = np.random.randn(20, input_dim).astype(np.float32)
+        probs = get_probabilities(model, X, device)
+
+        assert probs.shape == (20, num_classes)
+
+    def test_rows_sum_to_one(self):
+        """Each row of the probability output must sum to 1."""
+        from src.dl_pipeline import get_probabilities, set_seeds
+        import torch.nn as nn
+
+        set_seeds(42)
+        device = torch.device('cpu')
+        model = nn.Linear(5, 4)
+
+        X = np.random.randn(30, 5).astype(np.float32)
+        probs = get_probabilities(model, X, device)
+
+        row_sums = probs.sum(axis=1)
+        np.testing.assert_allclose(row_sums, 1.0, atol=1e-6)
+
+    def test_model_switches_to_eval_mode(self):
+        """get_probabilities must set model to eval() and restore after."""
+        from src.dl_pipeline import get_probabilities, set_seeds
+        import torch.nn as nn
+
+        set_seeds(42)
+        device = torch.device('cpu')
+        model = nn.Linear(5, 3)
+        model.train()  # Put in train mode
+
+        X = np.random.randn(10, 5).astype(np.float32)
+        _ = get_probabilities(model, X, device)
+        # get_probabilities leaves model in eval mode (its documented contract)
+        assert not model.training
+
 
 # ---------------------------------------------------------------------------
 # Test 9: Final retraining integrity (regression tests)
@@ -644,10 +779,9 @@ class TestFinalRetrainingIntegrity:
 
     def test_final_retrain_uses_full_train_not_fold(self, split_dataset):
         """Final retraining must fit MI/Scaler/PCA on full X_train, not a fold."""
-        from src.feature_selection import SelectKBest
+        from sklearn.feature_selection import SelectKBest, mutual_info_classif
         from sklearn.preprocessing import StandardScaler
         from sklearn.decomposition import PCA
-        from sklearn.feature_selection import mutual_info_classif
 
         X_train, X_test, y_train, y_test = split_dataset
 

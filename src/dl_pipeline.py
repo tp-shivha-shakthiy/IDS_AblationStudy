@@ -25,17 +25,21 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
+import joblib
 from collections import Counter
 
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.decomposition import PCA
-from sklearn.feature_selection import mutual_info_classif, SelectKBest
+from sklearn.feature_selection import SelectKBest
 from sklearn.model_selection import train_test_split, StratifiedKFold
 from sklearn.metrics import (accuracy_score, f1_score, precision_score,
                              recall_score, roc_auc_score, confusion_matrix,
                              ConfusionMatrixDisplay)
+from sklearn.cluster import MiniBatchKMeans
 from imblearn.over_sampling import SMOTE, KMeansSMOTE
 from imblearn.under_sampling import RandomUnderSampler
+
+from src.feature_selection import fit_mi_selector
 
 import matplotlib
 matplotlib.use('Agg')
@@ -138,8 +142,7 @@ def preprocess_fold(
 
     # 1. MI Feature Selection (fit on fold train only)
     if use_mi and mi_k > 0:
-        selector = SelectKBest(score_func=mutual_info_classif, k=min(mi_k, X_tr.shape[1]))
-        selector.fit(X_tr, y_tr)
+        selector = fit_mi_selector(X_tr, y_tr, k=mi_k, random_state=random_state)
         X_tr = selector.transform(X_tr)
         X_val = selector.transform(X_val)
 
@@ -162,9 +165,11 @@ def preprocess_fold(
         rus = RandomUnderSampler(sampling_strategy=under_strategy, random_state=random_state)
         X_tr_rus, y_tr_rus = rus.fit_resample(X_tr, y_tr)
 
+        actual_k = min(k_neighbors, min(Counter(y_tr_rus).values()) - 1)
         kms = KMeansSMOTE(
             cluster_balance_threshold=0.0,
-            k_neighbors=min(k_neighbors, min(Counter(y_tr_rus).values()) - 1),
+            k_neighbors=max(actual_k, 1),
+            kmeans_estimator=MiniBatchKMeans(n_init='auto', random_state=random_state),
             random_state=random_state, n_jobs=1,
         )
         X_tr, y_tr = kms.fit_resample(X_tr_rus, y_tr_rus)
@@ -212,8 +217,7 @@ def preprocess_final(
 
     # 1. MI (fit on full training only)
     if use_mi and mi_k > 0:
-        selector = SelectKBest(score_func=mutual_info_classif, k=min(mi_k, X_train.shape[1]))
-        selector.fit(X_train, y_train)
+        selector = fit_mi_selector(X_train, y_train, k=mi_k, random_state=random_state)
         X_train = selector.transform(X_train)
         X_test = selector.transform(X_test)
 
@@ -240,6 +244,7 @@ def preprocess_final(
         kms = KMeansSMOTE(
             cluster_balance_threshold=0.0,
             k_neighbors=max(actual_k, 1),
+            kmeans_estimator=MiniBatchKMeans(n_init='auto', random_state=random_state),
             random_state=random_state, n_jobs=1,
         )
         X_train, y_train = kms.fit_resample(X_tr_rus, y_tr_rus)
@@ -327,6 +332,28 @@ def evaluate_with_proba(
     return metrics
 
 
+def get_probabilities(model: nn.Module, X: np.ndarray, device: torch.device) -> np.ndarray:
+    """
+    Run a forward pass and return softmax probabilities as a numpy array.
+
+    Parameters
+    ----------
+    model   : trained nn.Module whose forward() returns raw logits
+    X       : array (N, F) — will be converted to a float32 tensor
+    device  : torch device
+
+    Returns
+    -------
+    np.ndarray (N, num_classes)  row-normalised probabilities
+    """
+    model.eval()
+    X_t = torch.tensor(X, dtype=torch.float32).to(device)
+    with torch.no_grad():
+        logits = model(X_t)
+        probs = torch.softmax(logits, dim=1).cpu().numpy()
+    return probs
+
+
 # ---------------------------------------------------------------------------
 # Artifact persistence
 # ---------------------------------------------------------------------------
@@ -341,9 +368,32 @@ def save_dl_artifacts(
     normal_class_idx: int = 0,
     y_test: np.ndarray = None,
     y_test_pred: np.ndarray = None,
+    selector=None,
+    scaler=None,
+    pca=None,
+    le=None,
+    config: dict = None,
 ):
     """
-    Save model weights, metrics CSV, metrics JSON, confusion matrix, ROC curve.
+    Save model weights, metrics CSV, metrics JSON, confusion matrix,
+    preprocessing artifacts (MI, Scaler, PCA, LabelEncoder), and config.json.
+
+    Parameters
+    ----------
+    model            : trained nn.Module
+    model_name       : str  (used for file naming)
+    cv_metrics       : list of per-fold metric dicts
+    test_metrics     : dict  (final test metrics)
+    save_dir         : str   (defaults to models/artifacts/<model_name>)
+    class_names      : list  (for confusion matrix labels)
+    normal_class_idx : int
+    y_test           : ground-truth labels  (for confusion matrix)
+    y_test_pred      : predicted labels     (for confusion matrix)
+    selector         : fitted SelectKBest   (MI feature selector)
+    scaler           : fitted StandardScaler
+    pca              : fitted PCA
+    le               : fitted LabelEncoder
+    config           : dict of all experiment hyper-parameters
     """
     if save_dir is None:
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -381,5 +431,26 @@ def save_dl_artifacts(
         plt.close(fig)
         print(f"  Confusion matrix saved → {save_dir}")
 
-    # Preprocessing artifacts
+    # Preprocessing artifacts (for inference reproducibility)
+    if selector is not None:
+        joblib.dump(selector, os.path.join(save_dir, "mi_selector.joblib"))
+    if scaler is not None:
+        joblib.dump(scaler, os.path.join(save_dir, "scaler.joblib"))
+    if pca is not None:
+        joblib.dump(pca, os.path.join(save_dir, "pca.joblib"))
+    if le is not None:
+        joblib.dump(le, os.path.join(save_dir, "label_encoder.joblib"))
+
+    # Config JSON
+    if config is None:
+        config = {}
+    config.setdefault("model_name", model_name)
+    config.setdefault("class_names", class_names)
+    config.setdefault("normal_class_idx", normal_class_idx)
+    config.setdefault("num_classes", len(class_names) if class_names else None)
+    config_path = os.path.join(save_dir, "config.json")
+    with open(config_path, 'w') as f:
+        json.dump(config, f, indent=2)
+    print(f"  Config saved → {config_path}")
+
     return save_dir
