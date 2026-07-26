@@ -6,12 +6,16 @@ Regression tests for Tier 2 DL pipeline.
 Tests:
   1. DataLoader drop_last=True (prevents batch=1 LayerNorm failure)
   2. Saved test metrics JSON has real finite AUC in [0, 1]
-  3. DeepNeuralNetwork uses LayerNorm (not BatchNorm1d)
-  4. get_probabilities returns valid probability arrays
-  5. evaluate_with_proba returns real AUC (not hardcoded 0.0)
-  6. preprocess_fold k_neighbors is floored at 1
+  3. DNN uses LayerNorm (not BatchNorm1d)
+  4. BiLSTM_SharedFE uses LayerNorm (not BatchNorm1d)
+  5. get_probabilities returns valid probability arrays
+  6. evaluate_with_proba returns real AUC (not hardcoded 0.0)
+  7. preprocess_fold k_neighbors is floored at 1
+  8. No DL script hardcodes auc=0.0 in final evaluation
+  9. Validation/test DataLoaders do NOT use drop_last=True
 """
 
+import ast
 import json
 import os
 import numpy as np
@@ -19,7 +23,6 @@ import pytest
 import torch
 import torch.nn as nn
 from collections import Counter
-from unittest.mock import patch, MagicMock
 from torch.utils.data import DataLoader, TensorDataset
 
 from src.dl_pipeline import (
@@ -50,7 +53,7 @@ def synthetic_numpy():
 
 
 # ---------------------------------------------------------------------------
-# 1. DataLoader must have drop_last=True
+# 1. DataLoader must have drop_last=True for training loaders
 # ---------------------------------------------------------------------------
 
 class TestDataLoaderDropLast:
@@ -69,6 +72,15 @@ class TestDataLoaderDropLast:
         )
         total_samples = sum(batch[0].shape[0] for batch in loader)
         assert total_samples == 8, "drop_last=True should drop the final incomplete batch"
+
+    def test_val_loader_no_drop_last(self):
+        X = torch.randn(10, 5)
+        y = torch.randint(0, 2, (10,))
+        loader = DataLoader(
+            TensorDataset(X, y), batch_size=8, shuffle=False, drop_last=False,
+        )
+        total_samples = sum(batch[0].shape[0] for batch in loader)
+        assert total_samples == 10, "Validation loader must NOT drop any samples"
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +135,7 @@ class TestMetricsJsonAUC:
 
 
 # ---------------------------------------------------------------------------
-# 3. DeepNeuralNetwork must use LayerNorm (not BatchNorm1d)
+# 3. DNN must use LayerNorm (not BatchNorm1d)
 # ---------------------------------------------------------------------------
 
 class TestArchitectureLayerNorm:
@@ -134,8 +146,8 @@ class TestArchitectureLayerNorm:
         has_batchnorm = any(isinstance(m, nn.BatchNorm1d) for m in model.modules())
         has_layernorm = any(isinstance(m, nn.LayerNorm) for m in model.modules())
 
-        assert has_layernorm, "DeepNeuralNetwork must use LayerNorm"
-        assert not has_batchnorm, "DeepNeuralNetwork must NOT use BatchNorm1d"
+        assert has_layernorm, "DeepNeuralNetwork (DNN_MI_PCA_KMeans) must use LayerNorm"
+        assert not has_batchnorm, "DeepNeuralNetwork (DNN_MI_PCA_KMeans) must NOT use BatchNorm1d"
 
     def test_dnn_forward_pass_small_batch(self):
         from models.train_dnn_mi_pca_kmeans import DeepNeuralNetwork
@@ -146,6 +158,38 @@ class TestArchitectureLayerNorm:
         out = model(x)
         assert out.shape == (1, 10)
         assert torch.isfinite(out).all()
+
+    def test_dnn_baseline_uses_layernorm(self):
+        from models.train_dnn import DeepNeuralNetwork
+        model = DeepNeuralNetwork(input_dim=20, output_dim=10)
+
+        has_batchnorm = any(isinstance(m, nn.BatchNorm1d) for m in model.modules())
+        has_layernorm = any(isinstance(m, nn.LayerNorm) for m in model.modules())
+
+        assert has_layernorm, "DNN baseline must use LayerNorm"
+        assert not has_batchnorm, "DNN baseline must NOT use BatchNorm1d"
+
+    def test_dnn_baseline_forward_pass_small_batch(self):
+        from models.train_dnn import DeepNeuralNetwork
+        model = DeepNeuralNetwork(input_dim=20, output_dim=10)
+        model.eval()
+
+        x = torch.randn(1, 20)
+        out = model(x)
+        assert out.shape == (1, 10)
+        assert torch.isfinite(out).all()
+
+    def test_shared_fe_uses_layernorm(self):
+        import importlib
+        mod = importlib.import_module("models.train_Bi-LSTM_shared-feature-extractor")
+        MultiTaskHierarchicalDNN = mod.MultiTaskHierarchicalDNN
+        model = MultiTaskHierarchicalDNN(input_dim=20, num_classes=10)
+
+        has_batchnorm = any(isinstance(m, nn.BatchNorm1d) for m in model.modules())
+        has_layernorm = any(isinstance(m, nn.LayerNorm) for m in model.modules())
+
+        assert has_layernorm, "BiLSTM_SharedFE must use LayerNorm"
+        assert not has_batchnorm, "BiLSTM_SharedFE must NOT use BatchNorm1d"
 
 
 # ---------------------------------------------------------------------------
@@ -171,6 +215,21 @@ class TestGetProbabilities:
         assert np.all(proba >= 0.0)
         assert np.all(proba <= 1.0)
         assert np.all(np.isfinite(proba))
+
+    def test_single_sample_probabilities(self):
+        model = nn.Sequential(
+            nn.Linear(10, 32),
+            nn.ReLU(),
+            nn.Linear(32, 5),
+        )
+        model.eval()
+        X = torch.randn(1, 10)
+        device = torch.device('cpu')
+
+        proba = get_probabilities(model, X, device)
+
+        assert proba.shape == (1, 5)
+        assert np.isclose(proba.sum(axis=1), 1.0, atol=1e-5)
 
 
 # ---------------------------------------------------------------------------
@@ -198,6 +257,20 @@ class TestEvaluateWithProba:
         y_pred = np.array([0, 1, 2, 0, 1, 2])
         metrics = evaluate_predictions(y_true, y_pred, normal_class_idx=0)
         assert metrics['auc'] == 0.0
+
+    def test_binary_auc_nonzero(self):
+        rng = np.random.RandomState(42)
+        n = 200
+        y_true = np.array([0] * 150 + [1] * 50)
+        y_proba = np.zeros((n, 2), dtype=np.float32)
+        y_proba[y_true == 0, 0] = 0.9
+        y_proba[y_true == 1, 1] = 0.9
+        y_proba += rng.uniform(0, 0.05, size=(n, 2)).astype(np.float32)
+        y_proba /= y_proba.sum(axis=1, keepdims=True)
+        y_pred = np.argmax(y_proba, axis=1)
+
+        metrics = evaluate_with_proba(y_true, y_pred, y_proba, normal_class_idx=0)
+        assert metrics['auc'] > 0.9, f"Binary AUC {metrics['auc']} too low"
 
 
 # ---------------------------------------------------------------------------
@@ -242,3 +315,166 @@ class TestKNeighborsFloor:
             X, y, strategy='smote', k_neighbors=100, random_state=42,
         )
         assert len(X_bal) > len(X)
+
+
+# ---------------------------------------------------------------------------
+# 7. No DL script hardcodes auc=0.0 in final evaluation path
+# ---------------------------------------------------------------------------
+
+class TestNoHardcodedAUC:
+    """Audit all DL scripts for hardcoded auc=0.0 or evaluate_predictions in test eval."""
+
+    def _parse_source(self, filepath):
+        with open(filepath) as f:
+            return f.read()
+
+    def test_train_dnn_uses_evaluate_with_proba(self):
+        src = self._parse_source("models/train_dnn.py")
+        # Should NOT import evaluate_predictions
+        assert "evaluate_predictions" not in src.split("from src.dl_pipeline")[0] or \
+               "evaluate_with_proba" in src
+        # Must use evaluate_with_proba
+        assert "evaluate_with_proba" in src
+        # Must use get_probabilities
+        assert "get_probabilities" in src
+
+    def test_train_lstm_uses_evaluate_with_proba(self):
+        src = self._parse_source("models/train_LSTM.py")
+        assert "evaluate_with_proba" in src
+        assert "get_probabilities" in src
+
+    def test_train_bilstm_uses_evaluate_with_proba(self):
+        src = self._parse_source("models/train_Bi-LSTM.py")
+        assert "evaluate_with_proba" in src
+        assert "get_probabilities" in src
+
+    def test_train_bilstm_sharedfe_uses_evaluate_with_proba(self):
+        src = self._parse_source("models/train_Bi-LSTM_shared-feature-extractor.py")
+        assert "evaluate_with_proba" in src
+
+    def test_train_dnn_mi_pca_kmeans_uses_evaluate_with_proba(self):
+        src = self._parse_source("models/train_dnn_mi_pca_kmeans.py")
+        assert "evaluate_with_proba" in src
+        assert "get_probabilities" in src
+
+    def test_no_script_has_auc_zero_literal_in_final_eval(self):
+        """No DL script should have auc=0.0 as a final metric value."""
+        scripts = [
+            "models/train_dnn.py",
+            "models/train_LSTM.py",
+            "models/train_Bi-LSTM.py",
+            "models/train_Bi-LSTM_shared-feature-extractor.py",
+            "models/train_dnn_mi_pca_kmeans.py",
+        ]
+        for script in scripts:
+            src = self._parse_source(script)
+            # The shared evaluate_predictions has auc=0.0 internally, which is fine
+            # but the script itself should never set auc=0.0 as final metric
+            # Check that there's no line like "test_metrics['auc'] = 0.0" or "auc': 0.0"
+            lines = src.split('\n')
+            for i, line in enumerate(lines):
+                stripped = line.strip()
+                # Skip comments
+                if stripped.startswith('#'):
+                    continue
+                # Skip if it's inside a function definition we don't own
+                assert "auc'] = 0.0" not in stripped and "auc'] =0.0" not in stripped, \
+                    f"{script} line {i+1} hardcodes auc=0.0: {stripped}"
+
+
+# ---------------------------------------------------------------------------
+# 8. All training DataLoaders use drop_last=True
+# ---------------------------------------------------------------------------
+
+class TestTrainingDropLastAudit:
+    """Audit all DL scripts to ensure training DataLoaders have drop_last=True."""
+
+    def _parse_source(self, filepath):
+        with open(filepath) as f:
+            return f.read()
+
+    def _count_dataloader_creates(self, src):
+        """Count DataLoader() calls and check for drop_last."""
+        results = []
+        lines = src.split('\n')
+        in_loader = False
+        loader_lines = []
+        paren_depth = 0
+        for i, line in enumerate(lines):
+            if 'DataLoader(' in line and not in_loader:
+                in_loader = True
+                loader_lines = [line]
+                paren_depth = line.count('(') - line.count(')')
+            elif in_loader:
+                loader_lines.append(line)
+                paren_depth += line.count('(') - line.count(')')
+                if paren_depth <= 0:
+                    block = '\n'.join(loader_lines)
+                    has_drop_last_true = 'drop_last=True' in block
+                    results.append({
+                        'line': i + 1 - len(loader_lines) + 1,
+                        'block': block,
+                        'has_drop_last_true': has_drop_last_true,
+                    })
+                    in_loader = False
+                    loader_lines = []
+        return results
+
+    def test_train_dnn_all_loaders_have_drop_last(self):
+        src = self._parse_source("models/train_dnn.py")
+        loaders = self._count_dataloader_creates(src)
+        for ld in loaders:
+            assert ld['has_drop_last_true'], \
+                f"train_dnn.py DataLoader at line ~{ld['line']} missing drop_last=True"
+
+    def test_train_lstm_all_loaders_have_drop_last(self):
+        src = self._parse_source("models/train_LSTM.py")
+        loaders = self._count_dataloader_creates(src)
+        for ld in loaders:
+            assert ld['has_drop_last_true'], \
+                f"train_LSTM.py DataLoader at line ~{ld['line']} missing drop_last=True"
+
+    def test_train_bilstm_all_loaders_have_drop_last(self):
+        src = self._parse_source("models/train_Bi-LSTM.py")
+        loaders = self._count_dataloader_creates(src)
+        for ld in loaders:
+            assert ld['has_drop_last_true'], \
+                f"train_Bi-LSTM.py DataLoader at line ~{ld['line']} missing drop_last=True"
+
+    def test_train_bilstm_sharedfe_all_loaders_have_drop_last(self):
+        src = self._parse_source("models/train_Bi-LSTM_shared-feature-extractor.py")
+        loaders = self._count_dataloader_creates(src)
+        for ld in loaders:
+            assert ld['has_drop_last_true'], \
+                f"train_Bi-LSTM_shared-feature-extractor.py DataLoader at line ~{ld['line']} missing drop_last=True"
+
+    def test_train_dnn_mi_pca_kmeans_all_loaders_have_drop_last(self):
+        src = self._parse_source("models/train_dnn_mi_pca_kmeans.py")
+        loaders = self._count_dataloader_creates(src)
+        for ld in loaders:
+            assert ld['has_drop_last_true'], \
+                f"train_dnn_mi_pca_kmeans.py DataLoader at line ~{ld['line']} missing drop_last=True"
+
+
+# ---------------------------------------------------------------------------
+# 9. No BatchNorm1d in any DL script
+# ---------------------------------------------------------------------------
+
+class TestNoBatchNorm:
+    """Audit that no DL script uses BatchNorm1d."""
+
+    def _parse_source(self, filepath):
+        with open(filepath) as f:
+            return f.read()
+
+    def test_train_dnn_no_batchnorm(self):
+        src = self._parse_source("models/train_dnn.py")
+        assert "BatchNorm1d" not in src
+
+    def test_train_dnn_mi_pca_kmeans_no_batchnorm(self):
+        src = self._parse_source("models/train_dnn_mi_pca_kmeans.py")
+        assert "BatchNorm1d" not in src
+
+    def test_train_bilstm_sharedfe_no_batchnorm(self):
+        src = self._parse_source("models/train_Bi-LSTM_shared-feature-extractor.py")
+        assert "BatchNorm1d" not in src

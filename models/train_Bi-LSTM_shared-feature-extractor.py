@@ -5,7 +5,7 @@ Multi-Task Hierarchical DNN with shared feature extractor.
 
 Uses shared infrastructure from src/dl_pipeline.py.
 Architecture preserved:
-  Shared base: Linear(in→128)→BN→ReLU→Drop(0.2)→Linear(128→64)→BN→ReLU→Drop(0.2)
+  Shared base: Linear(in→128)→LN→ReLU→Drop(0.2)→Linear(128→64)→LN→ReLU→Drop(0.2)
   Binary head: Linear(64→2)
   Multi head:  Linear(64→32)→ReLU→Linear(32→num_classes)
   Loss: 0.4 * CE(binary) + 0.6 * CE(multi)
@@ -25,7 +25,7 @@ from sklearn.model_selection import StratifiedKFold
 from src.dl_pipeline import (
     set_seeds, get_device, load_data,
     preprocess_fold, preprocess_final,
-    evaluate_predictions, save_dl_artifacts,
+    evaluate_with_proba, save_dl_artifacts,
 )
 
 set_seeds(42)
@@ -43,11 +43,11 @@ class MultiTaskHierarchicalDNN(nn.Module):
         # Shared feature extractor
         self.shared = nn.Sequential(
             nn.Linear(input_dim, 128),
-            nn.BatchNorm1d(128),
+            nn.LayerNorm(128),
             nn.ReLU(),
             nn.Dropout(0.2),
             nn.Linear(128, 64),
-            nn.BatchNorm1d(64),
+            nn.LayerNorm(64),
             nn.ReLU(),
             nn.Dropout(0.2),
         )
@@ -108,7 +108,7 @@ def main(data_dir="data/raw"):
 
         train_loader = DataLoader(
             TensorDataset(X_tr_t, y_tr_t, y_tr_bin_t),
-            batch_size=512, shuffle=True,
+            batch_size=512, shuffle=True, drop_last=True,
         )
 
         model = MultiTaskHierarchicalDNN(
@@ -133,10 +133,11 @@ def main(data_dir="data/raw"):
 
         model.eval()
         with torch.no_grad():
-            bin_out, multi_out = model(X_val_t.to(device))
-            preds_multi = torch.argmax(multi_out, dim=1).cpu().numpy()
+            _, multi_out = model(X_val_t.to(device))
+            y_proba = torch.softmax(multi_out, dim=1).cpu().numpy()
+        preds_multi = np.argmax(y_proba, axis=1)
 
-        metrics = evaluate_predictions(y_val, preds_multi, normal_class_idx)
+        metrics = evaluate_with_proba(y_val, preds_multi, y_proba, normal_class_idx)
         metrics['fold'] = fold
         cv_metrics.append(metrics)
         print(f"    Acc={metrics['multi_acc']:.4f}  F1={metrics['weighted_f1']:.4f}")
@@ -158,7 +159,7 @@ def main(data_dir="data/raw"):
 
     train_loader = DataLoader(
         TensorDataset(X_tr_t, y_tr_t, y_tr_bin_t),
-        batch_size=512, shuffle=True,
+        batch_size=512, shuffle=True, drop_last=True,
     )
 
     final_model = MultiTaskHierarchicalDNN(
@@ -185,9 +186,10 @@ def main(data_dir="data/raw"):
     final_model.eval()
     with torch.no_grad():
         _, multi_out = final_model(X_te_t.to(device))
-        test_preds = torch.argmax(multi_out, dim=1).cpu().numpy()
+        y_proba = torch.softmax(multi_out, dim=1).cpu().numpy()
+    test_preds = np.argmax(y_proba, axis=1)
 
-    test_metrics = evaluate_predictions(y_test, test_preds, normal_class_idx)
+    test_metrics = evaluate_with_proba(y_test, test_preds, y_proba, normal_class_idx)
 
     print(f"\n  {MODEL_NAME} Test Metrics:")
     for k, v in test_metrics.items():

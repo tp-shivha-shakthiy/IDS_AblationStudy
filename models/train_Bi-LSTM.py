@@ -25,7 +25,7 @@ from collections import Counter
 from src.dl_pipeline import (
     set_seeds, get_device, load_data,
     preprocess_fold, preprocess_final,
-    evaluate_predictions, save_dl_artifacts,
+    evaluate_with_proba, get_probabilities, save_dl_artifacts,
 )
 
 set_seeds(42)
@@ -103,7 +103,7 @@ def main(data_dir="data/raw"):
         X_val_t = torch.tensor(fold_data['X_val'], dtype=torch.float32)
 
         train_loader = DataLoader(
-            TensorDataset(X_tr_t, y_tr_t), batch_size=512, shuffle=True,
+            TensorDataset(X_tr_t, y_tr_t), batch_size=512, shuffle=True, drop_last=True,
         )
 
         model = WeightedBiLSTM(fold_data['X_tr'].shape[1], num_classes).to(device)
@@ -120,10 +120,10 @@ def main(data_dir="data/raw"):
                 optimizer.step()
 
         model.eval()
-        with torch.no_grad():
-            preds = torch.argmax(model(X_val_t.to(device)), dim=1).cpu().numpy()
+        y_proba = get_probabilities(model, X_val_t, device)
+        preds = np.argmax(y_proba, axis=1)
 
-        metrics = evaluate_predictions(y_val, preds, normal_class_idx)
+        metrics = evaluate_with_proba(y_val, preds, y_proba, normal_class_idx)
         metrics['fold'] = fold
         cv_metrics.append(metrics)
         print(f"    Acc={metrics['multi_acc']:.4f}  F1={metrics['weighted_f1']:.4f}")
@@ -149,7 +149,7 @@ def main(data_dir="data/raw"):
     X_te_t = torch.tensor(final_data['X_test'], dtype=torch.float32)
 
     train_loader = DataLoader(
-        TensorDataset(X_tr_t, y_tr_t), batch_size=512, shuffle=True,
+        TensorDataset(X_tr_t, y_tr_t), batch_size=512, shuffle=True, drop_last=True,
     )
 
     final_model = WeightedBiLSTM(final_data['X_train'].shape[1], num_classes).to(device)
@@ -167,10 +167,10 @@ def main(data_dir="data/raw"):
 
     # --- Test evaluation ---
     final_model.eval()
-    with torch.no_grad():
-        test_preds = torch.argmax(final_model(X_te_t.to(device)), dim=1).cpu().numpy()
+    y_proba = get_probabilities(final_model, X_te_t, device)
+    test_preds = np.argmax(y_proba, axis=1)
 
-    test_metrics = evaluate_predictions(y_test, test_preds, normal_class_idx)
+    test_metrics = evaluate_with_proba(y_test, test_preds, y_proba, normal_class_idx)
 
     print(f"\n  {MODEL_NAME} Test Metrics:")
     for k, v in test_metrics.items():

@@ -4,7 +4,7 @@ train_dnn.py
 Deep Neural Network — Baseline (no MI/PCA/balancing, class-weight loss)
 
 Uses shared infrastructure from src/dl_pipeline.py.
-Architecture preserved: 2 hidden layers (64→32), BatchNorm, Dropout(0.1).
+Architecture preserved: 2 hidden layers (64→32), LayerNorm, Dropout(0.1).
 """
 
 import sys
@@ -20,7 +20,7 @@ from sklearn.model_selection import StratifiedKFold
 
 from src.dl_pipeline import (
     set_seeds, get_device, load_data,
-    compute_class_weights, evaluate_predictions, save_dl_artifacts,
+    compute_class_weights, evaluate_with_proba, get_probabilities, save_dl_artifacts,
 )
 
 set_seeds(42)
@@ -37,11 +37,11 @@ class DeepNeuralNetwork(nn.Module):
         super().__init__()
         self.network = nn.Sequential(
             nn.Linear(input_dim, 64),
-            nn.BatchNorm1d(64),
+            nn.LayerNorm(64),
             nn.ReLU(),
             nn.Dropout(0.1),
             nn.Linear(64, 32),
-            nn.BatchNorm1d(32),
+            nn.LayerNorm(32),
             nn.ReLU(),
             nn.Linear(32, output_dim),
         )
@@ -89,7 +89,7 @@ def main(data_dir="data/raw"):
         X_val_t = torch.tensor(X_val_s, dtype=torch.float32)
 
         train_loader = DataLoader(
-            TensorDataset(X_tr_t, y_tr_t), batch_size=1024, shuffle=True,
+            TensorDataset(X_tr_t, y_tr_t), batch_size=1024, shuffle=True, drop_last=True,
         )
 
         model = DeepNeuralNetwork(X_tr.shape[1], num_classes).to(device)
@@ -106,10 +106,10 @@ def main(data_dir="data/raw"):
                 optimizer.step()
 
         model.eval()
-        with torch.no_grad():
-            preds = torch.argmax(model(X_val_t.to(device)), dim=1).cpu().numpy()
+        y_proba = get_probabilities(model, X_val_t, device)
+        preds = np.argmax(y_proba, axis=1)
 
-        metrics = evaluate_predictions(y_val, preds, normal_class_idx)
+        metrics = evaluate_with_proba(y_val, preds, y_proba, normal_class_idx)
         metrics['fold'] = fold
         cv_metrics.append(metrics)
         print(f"    Acc={metrics['multi_acc']:.4f}  F1={metrics['weighted_f1']:.4f}")
@@ -126,7 +126,7 @@ def main(data_dir="data/raw"):
     X_te_t = torch.tensor(X_test_s, dtype=torch.float32)
 
     train_loader = DataLoader(
-        TensorDataset(X_tr_t, y_tr_t), batch_size=1024, shuffle=True,
+        TensorDataset(X_tr_t, y_tr_t), batch_size=1024, shuffle=True, drop_last=True,
     )
 
     final_model = DeepNeuralNetwork(X_train.shape[1], num_classes).to(device)
@@ -144,10 +144,10 @@ def main(data_dir="data/raw"):
 
     # --- Test evaluation ---
     final_model.eval()
-    with torch.no_grad():
-        test_preds = torch.argmax(final_model(X_te_t.to(device)), dim=1).cpu().numpy()
+    y_proba = get_probabilities(final_model, X_te_t, device)
+    test_preds = np.argmax(y_proba, axis=1)
 
-    test_metrics = evaluate_predictions(y_test, test_preds, normal_class_idx)
+    test_metrics = evaluate_with_proba(y_test, test_preds, y_proba, normal_class_idx)
 
     print(f"\n  {MODEL_NAME} Test Metrics:")
     for k, v in test_metrics.items():
