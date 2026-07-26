@@ -58,7 +58,10 @@ def balance_training_fold(
         )
         mbk.fit_predict(X_train)
 
-    sm = SMOTE(random_state=random_state, k_neighbors=k_neighbors)
+    from collections import Counter
+    minority_count = min(Counter(y_train).values())
+    actual_k = min(k_neighbors, minority_count - 1)
+    sm = SMOTE(random_state=random_state, k_neighbors=max(actual_k, 1))
     X_res, y_res = sm.fit_resample(X_train, y_train)
     return X_res, y_res
 

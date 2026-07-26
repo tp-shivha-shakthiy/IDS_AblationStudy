@@ -36,6 +36,7 @@ from sklearn.metrics import (accuracy_score, f1_score, precision_score,
                              ConfusionMatrixDisplay)
 from imblearn.over_sampling import SMOTE, KMeansSMOTE
 from imblearn.under_sampling import RandomUnderSampler
+from sklearn.cluster import MiniBatchKMeans
 
 import matplotlib
 matplotlib.use('Agg')
@@ -162,9 +163,11 @@ def preprocess_fold(
         rus = RandomUnderSampler(sampling_strategy=under_strategy, random_state=random_state)
         X_tr_rus, y_tr_rus = rus.fit_resample(X_tr, y_tr)
 
+        actual_k = min(k_neighbors, min(Counter(y_tr_rus).values()) - 1)
         kms = KMeansSMOTE(
             cluster_balance_threshold=0.0,
-            k_neighbors=min(k_neighbors, min(Counter(y_tr_rus).values()) - 1),
+            k_neighbors=max(actual_k, 1),
+            kmeans_estimator=MiniBatchKMeans(n_init='auto', random_state=random_state),
             random_state=random_state, n_jobs=1,
         )
         X_tr, y_tr = kms.fit_resample(X_tr_rus, y_tr_rus)
@@ -240,6 +243,7 @@ def preprocess_final(
         kms = KMeansSMOTE(
             cluster_balance_threshold=0.0,
             k_neighbors=max(actual_k, 1),
+            kmeans_estimator=MiniBatchKMeans(n_init='auto', random_state=random_state),
             random_state=random_state, n_jobs=1,
         )
         X_train, y_train = kms.fit_resample(X_tr_rus, y_tr_rus)
@@ -318,13 +322,28 @@ def evaluate_with_proba(
     """Compute metrics including AUC when probabilities are available."""
     metrics = evaluate_predictions(y_true, y_pred, normal_class_idx)
     try:
-        from sklearn.preprocessing import label_binarize
-        classes = np.unique(np.concatenate([y_true, np.arange(y_proba.shape[1])]))
-        y_bin = label_binarize(y_true, classes=list(range(y_proba.shape[1])))
-        metrics['auc'] = roc_auc_score(y_bin, y_proba, multi_class='ovr', average='weighted')
+        classes = np.unique(y_true)
+        if len(classes) == 2 and y_proba.shape[1] == 2:
+            y_bin = (y_true != normal_class_idx).astype(int)
+            p_attack = y_proba[:, 1] if normal_class_idx == 0 else y_proba[:, 0]
+            metrics['auc'] = roc_auc_score(y_bin, p_attack)
+        else:
+            from sklearn.preprocessing import label_binarize
+            n_classes = y_proba.shape[1]
+            y_bin = label_binarize(y_true, classes=list(range(n_classes)))
+            metrics['auc'] = roc_auc_score(y_bin, y_proba, multi_class='ovr', average='weighted')
     except Exception:
         metrics['auc'] = 0.0
     return metrics
+
+
+def get_probabilities(model, X_tensor, device):
+    """Run forward pass and return class probabilities as numpy array."""
+    model.eval()
+    with torch.no_grad():
+        logits = model(X_tensor.to(device))
+        proba = torch.softmax(logits, dim=1).cpu().numpy()
+    return proba
 
 
 # ---------------------------------------------------------------------------
