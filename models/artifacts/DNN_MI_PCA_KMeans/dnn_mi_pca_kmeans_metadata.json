@@ -1,0 +1,20 @@
+{
+  "model_name": "DNN_MI_PCA_KMeans",
+  "class_names": [
+    "Analysis",
+    "Backdoor",
+    "DoS",
+    "Exploits",
+    "Fuzzers",
+    "Generic",
+    "Normal",
+    "Reconnaissance",
+    "Shellcode",
+    "Worms"
+  ],
+  "normal_class_idx": 6,
+  "model_config": {
+    "input_dim": 15,
+    "output_dim": 10
+  }
+}
