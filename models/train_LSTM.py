@@ -25,7 +25,7 @@ from src.dl_pipeline import (
 )
 
 set_seeds(42)
-device = get_device()
+device = torch.device('cpu')
 MODEL_NAME = "LSTM"
 
 
@@ -59,7 +59,9 @@ class BiLSTMNetwork(nn.Module):
 # Pipeline
 # ======================================================================
 
-def main(data_dir="data/raw"):
+def main(data_dir="data/raw", device_name="auto"):
+    global device
+    device = get_device(device_name)
     data = load_data(data_dir)
     X_train, X_test = data['X_train'], data['X_test']
     y_train, y_test = data['y_train'], data['y_test']
@@ -176,5 +178,9 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-dir", default="data/raw")
+    parser.add_argument(
+        "--device", choices=["auto", "cpu", "cuda"], default="auto",
+        help="Execution device; use cpu to bypass CUDA/NVML driver failures.",
+    )
     args = parser.parse_args()
-    main(data_dir=args.data_dir)
+    main(data_dir=args.data_dir, device_name=args.device)

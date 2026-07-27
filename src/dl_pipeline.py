@@ -58,9 +58,33 @@ def set_seeds(seed: int = 42):
         torch.backends.cudnn.benchmark = False
 
 
-def get_device():
-    """Return the best available torch device."""
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+def get_device(requested: str = "auto"):
+    """Return a verified Torch device, falling back to CPU for CUDA failures."""
+    if requested not in {"auto", "cpu", "cuda"}:
+        raise ValueError("device must be 'auto', 'cpu', or 'cuda'")
+    if requested == "cpu":
+        device = torch.device('cpu')
+    elif not torch.cuda.is_available():
+        if requested == "cuda":
+            raise RuntimeError("CUDA was requested but is not available to PyTorch.")
+        device = torch.device('cpu')
+    else:
+        try:
+            # Trigger the CUDA allocator before an expensive training run. This
+            # catches common driver/NVML allocator failures and permits a safe
+            # CPU fallback when device selection is automatic.
+            probe = torch.empty(1, device='cuda')
+            del probe
+            torch.cuda.synchronize()
+            device = torch.device('cuda')
+        except RuntimeError as exc:
+            if requested == "cuda":
+                raise RuntimeError(
+                    "CUDA initialization failed. Update the NVIDIA driver / "
+                    "PyTorch CUDA build, or rerun with --device cpu."
+                ) from exc
+            print(f"CUDA health check failed ({exc}); falling back to CPU.")
+            device = torch.device('cpu')
     print(f"Device: {device}")
     return device
 

@@ -189,6 +189,13 @@ python models/train_LSTM.py
 python models/train_Bi-LSTM_shared-feature-extractor.py
 ```
 
+If the NVIDIA driver or the installed PyTorch CUDA build reports an NVML or
+CUDA allocator error, run the LSTM experiment on CPU:
+
+```bash
+python models/train_LSTM.py --device cpu
+```
+
 ### 5. Pipeline options (`main.py`)
 
 | Flag | Default | Description |
