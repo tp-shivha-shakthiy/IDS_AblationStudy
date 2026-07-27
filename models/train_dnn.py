@@ -71,12 +71,11 @@ def main(data_dir="data/raw"):
     skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
     cv_metrics = []
 
-    class_weights = compute_class_weights(y_train, device)
-
     for fold, (trn_idx, val_idx) in enumerate(skf.split(X_train, y_train), 1):
         print(f"\n  Fold {fold}/5")
         X_tr, y_tr = X_train[trn_idx], y_train[trn_idx]
         X_val, y_val = X_train[val_idx], y_train[val_idx]
+        class_weights = compute_class_weights(y_tr, device)
 
         # Scaler fitted on fold train only
         from sklearn.preprocessing import StandardScaler
@@ -130,6 +129,7 @@ def main(data_dir="data/raw"):
     )
 
     final_model = DeepNeuralNetwork(X_train.shape[1], num_classes).to(device)
+    class_weights = compute_class_weights(y_train, device)
     criterion = nn.CrossEntropyLoss(weight=class_weights)
     optimizer = optim.AdamW(final_model.parameters(), lr=0.01, weight_decay=1e-4)
 
@@ -162,6 +162,9 @@ def main(data_dir="data/raw"):
         class_names=class_names,
         normal_class_idx=normal_class_idx,
         y_test=y_test, y_test_pred=test_preds,
+        scaler=scaler,
+        label_encoder=data['le'],
+        model_config={'input_dim': X_train.shape[1], 'output_dim': num_classes},
     )
 
     return final_model, cv_metrics, test_metrics

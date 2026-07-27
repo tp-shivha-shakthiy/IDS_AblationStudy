@@ -29,11 +29,11 @@ from src.evaluation import plot_confusion_matrix, plot_roc_curve
 MODEL_NAME = "LogReg"
 
 
-def _train_and_evaluate(X_tr, y_tr, X_val, y_val):
+def _train_and_evaluate(X_tr, y_tr, X_val, y_val, random_state=42):
     """Train Logistic Regression on balanced data, return metrics dict."""
     model = LogisticRegression(
         multi_class='multinomial', solver='saga',
-        max_iter=50, random_state=42, n_jobs=-1,
+        max_iter=50, random_state=random_state, n_jobs=-1,
     )
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
@@ -67,6 +67,9 @@ def train_and_evaluate(
     pca_variance: float = 0.95,
     k_neighbors: int = 3,
     random_state: int = 42,
+    balancer: str = "kmeans",
+    make_plots: bool = True,
+    normal_class_idx: int = 0,
 ) -> dict:
     """
     Full LogReg pipeline: CV → final retrain → test eval.
@@ -83,7 +86,7 @@ def train_and_evaluate(
 
     model_params = dict(
         multi_class='multinomial', solver='saga',
-        max_iter=50, random_state=42, n_jobs=-1,
+        max_iter=50, random_state=random_state, n_jobs=-1,
     )
 
     # --- Step 1: Per-fold CV (MI + Scaler + PCA + K-means SMOTE inside) ---
@@ -97,7 +100,8 @@ def train_and_evaluate(
         pca_variance=pca_variance,
         k_neighbors=k_neighbors,
         random_state=random_state,
-        strategy="kmeans",
+        strategy=balancer,
+        normal_class_idx=normal_class_idx,
     )
 
     print(f"\n  CV Results ({MODEL_NAME}):")
@@ -121,15 +125,19 @@ def train_and_evaluate(
     print(f"    PCA components: {X_train_p.shape[1]}")
 
     X_train_b, y_train_b = balance_full_train(
-        X_train_p, y_train, strategy="kmeans",
+        X_train_p, y_train, strategy=balancer,
         k_neighbors=k_neighbors, random_state=random_state,
     )
 
     X_test_p = pca.transform(scaler.transform(X_test_mi))
 
     model, test_metrics, y_test_pred = _train_and_evaluate(
-        X_train_b, y_train_b, X_test_p, y_test,
+        X_train_b, y_train_b, X_test_p, y_test, random_state=random_state,
     )
+    y_test_binary = (y_test != normal_class_idx).astype(int)
+    y_pred_binary = (y_test_pred != normal_class_idx).astype(int)
+    test_metrics['binary_accuracy'] = accuracy_score(y_test_binary, y_pred_binary)
+    test_metrics['binary_f1'] = f1_score(y_test_binary, y_pred_binary, zero_division=0)
 
     print(f"\n  {MODEL_NAME} Test Metrics:")
     for k, v in test_metrics.items():
@@ -143,17 +151,18 @@ def train_and_evaluate(
     joblib.dump(model, model_path)
     print(f"\n  Model saved → {model_path}")
 
-    plot_confusion_matrix(
-        y_test, y_test_pred, class_names,
-        normal_class_idx=0, save_dir=save_dir,
-        prefix=f"{MODEL_NAME.lower()}_",
-    )
-    plot_roc_curve(
-        model, X_test_mi, y_test, class_names,
-        scaler=scaler, pca=pca,
-        title=f"{MODEL_NAME} ROC Curve (Test Set)",
-        save_dir=save_dir, prefix=f"{MODEL_NAME.lower()}_",
-    )
+    if make_plots:
+        plot_confusion_matrix(
+            y_test, y_test_pred, class_names,
+            normal_class_idx=normal_class_idx, save_dir=save_dir,
+            prefix=f"{MODEL_NAME.lower()}_",
+        )
+        plot_roc_curve(
+            model, X_test_mi, y_test, class_names,
+            scaler=scaler, pca=pca,
+            title=f"{MODEL_NAME} ROC Curve (Test Set)",
+            save_dir=save_dir, prefix=f"{MODEL_NAME.lower()}_",
+        )
 
     results = {
         'model': model,

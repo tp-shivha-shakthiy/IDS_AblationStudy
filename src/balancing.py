@@ -19,7 +19,7 @@ Both support:
 """
 
 import numpy as np
-from imblearn.over_sampling import SMOTE
+from imblearn.over_sampling import SMOTE, KMeansSMOTE
 from sklearn.cluster import MiniBatchKMeans
 
 
@@ -51,17 +51,32 @@ def balance_training_fold(
     -------
     X_balanced, y_balanced
     """
-    if strategy == "kmeans":
-        mbk = MiniBatchKMeans(
-            n_clusters=n_clusters, batch_size=2048,
-            random_state=random_state, n_init='auto',
-        )
-        mbk.fit_predict(X_train)
-
     from collections import Counter
     minority_count = min(Counter(y_train).values())
+    if minority_count < 2:
+        raise ValueError(
+            "Balancing requires at least two samples in every class; "
+            "reduce n_splits or remove singleton classes first."
+        )
     actual_k = min(k_neighbors, minority_count - 1)
-    sm = SMOTE(random_state=random_state, k_neighbors=max(actual_k, 1))
+    if strategy == "kmeans":
+        # KMeansSMOTE uses cluster membership to decide where to synthesize
+        # samples.  The previous implementation fitted KMeans and discarded
+        # its labels, making this option indistinguishable from plain SMOTE.
+        sm = KMeansSMOTE(
+            k_neighbors=max(actual_k, 1),
+            kmeans_estimator=MiniBatchKMeans(
+                n_clusters=min(n_clusters, len(X_train)), batch_size=2048,
+                random_state=random_state, n_init='auto',
+            ),
+            cluster_balance_threshold=0.0,
+            random_state=random_state,
+            n_jobs=1,
+        )
+    elif strategy == "smote":
+        sm = SMOTE(random_state=random_state, k_neighbors=max(actual_k, 1))
+    else:
+        raise ValueError("strategy must be 'kmeans' or 'smote'")
     X_res, y_res = sm.fit_resample(X_train, y_train)
     return X_res, y_res
 

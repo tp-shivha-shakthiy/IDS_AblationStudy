@@ -203,6 +203,9 @@ def main(data_dir="data/raw"):
         class_names=class_names,
         normal_class_idx=normal_class_idx,
         y_test=y_test, y_test_pred=test_preds,
+        selector=final_data['selector'], scaler=final_data['scaler'],
+        pca=final_data['pca'], label_encoder=data['le'],
+        model_config={'input_dim': final_data['X_train'].shape[1], 'num_classes': num_classes},
     )
 
     return final_model, cv_metrics, test_metrics

@@ -10,6 +10,10 @@ Implements the framework described in:
 
 ## Key Results
 
+> The table below is a historical experiment snapshot. Re-run the corrected
+> pipeline before using any number for comparison or publication; generated
+> outputs are overwritten on each run.
+
 | Model | Feature Selection | Sampling | Binary Acc | Binary F1 | Multi-class Acc | Macro F1 | Weighted F1 |
 |---|---|---|---|---|---|---|---|
 | **Bi-LSTM (Bidirectional)** | MI + PCA + Log | KMeansSMOTE | **99.04%** | **0.9552** | **98.08%** | 0.4725 | **0.9792** |
@@ -122,7 +126,7 @@ data/raw/UNSW-NB15_1..4.csv
                └──────────────────┘
 ```
 
-The sklearn models (HGB, XGBoost, Logistic Regression) run through the shared pipeline via `main.py`. The deep learning models are self-contained scripts with their own preprocessing, feature selection, and balancing built in.
+The sklearn models run through `main.py`. Deep-learning scripts share data loading, splitting, preprocessing, balancing, evaluation, and artifact infrastructure in `src/dl_pipeline.py`.
 
 ---
 
@@ -132,11 +136,16 @@ The sklearn models (HGB, XGBoost, Logistic Regression) run through the shared pi
 
 | Model | File | Notes |
 |---|---|---|
-| HistGradientBoostingClassifier | `models/train_hgb.py` | LightGBM-style binning, 5-fold CV |
-| XGBoost | `models/train_xgboost.py` | CV + blind 20% holdout evaluation |
-| Logistic Regression | `models/train_logistic.py` | Multinomial, saga solver, CV + test |
+| HistGradientBoostingClassifier | `src/train_hgb.py` | CV + blind 20% holdout evaluation |
+| XGBoost | `src/train_xgboost.py` | CV + blind 20% holdout evaluation |
+| Logistic Regression | `src/train_logistic.py` | Multinomial, saga solver, CV + holdout evaluation |
 
 ### Deep learning models (self-contained PyTorch scripts)
+
+All deep-learning scripts use the shared pipeline. The DNN variants use
+LayerNorm (not BatchNorm), and `train_Bi-LSTM.py` trains only the weighted
+Bi-LSTM; XGBoost is provided by the Tier 1 pipeline. DL resampling is bounded
+with RandomUnderSampler followed by KMeansSMOTE on training data only.
 
 | Script | Architecture | Preprocessing | Balancing |
 |---|---|---|---|
@@ -155,10 +164,7 @@ The sklearn models (HGB, XGBoost, Logistic Regression) run through the shared pi
 pip install -r requirements.txt
 ```
 
-The DL scripts require PyTorch, which is not in `requirements.txt`. Install separately:
-```bash
-pip install torch
-```
+PyTorch is included in `requirements.txt`.
 
 ### 2. Download the dataset
 
@@ -188,14 +194,14 @@ python models/train_Bi-LSTM_shared-feature-extractor.py
 | Flag | Default | Description |
 |---|---|---|
 | `--data-dir` | `data/raw` | Path to raw CSV files |
-| `--balancer` | `smote` | Balancing strategy: `smote` or `kmeans` |
+| `--balancer` | `kmeans` | Balancing strategy: `kmeans` (KMeansSMOTE) or `smote` |
 | `--n-splits` | `5` | Number of CV folds |
 | `--mi-k` | `15` | Top-k MI features to retain |
-| `--pca-components` | `10` | PCA output dimensions |
+| `--pca-variance` | `0.95` | Cumulative PCA variance to retain |
 | `--skip-plots` | off | Skip saving confusion matrix PNGs |
 
 ```bash
-python main.py --balancer kmeans --pca-components 12 --skip-plots
+python main.py --balancer smote --pca-variance 0.95 --skip-plots
 ```
 
 ---
@@ -256,8 +262,8 @@ Generated outputs:
 |---|---|
 | `results/model_comparison.csv` | Blind holdout metrics for all sklearn models |
 | `results/metrics.csv` | Per-fold CV metrics for all sklearn models |
-| `results/model_comparison.xlsx` | Pre-generated blind holdout metrics (git-committed) |
-| `assets/` | Confusion matrix PNGs + XGBoost feature importance plot |
+| `results/corrected_pipeline/<model>/experiment_config.json` | Per-model configuration and source revision |
+| `models/artifacts/<model>/` | Model weights, preprocessing artifacts, metadata, and plots |
 
 ---
 

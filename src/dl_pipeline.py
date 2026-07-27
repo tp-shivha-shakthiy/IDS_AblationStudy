@@ -25,6 +25,7 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
+import joblib
 from collections import Counter
 
 from sklearn.preprocessing import StandardScaler, LabelEncoder
@@ -232,22 +233,23 @@ def preprocess_final(
         X_train = pca.fit_transform(X_train)
         X_test = pca.transform(X_test)
 
-    # 4. Balancing (full training only, never touch test)
+    # 4. Balancing — use the same bounded RUS + KMeansSMOTE policy as CV.
+    # Without the cap, KMeansSMOTE tries to expand rare classes to the full
+    # majority-class size on UNSW-NB15, which can exhaust available memory.
     if use_balancing:
         class_counts = Counter(y_train)
         under_strategy = {c: min(cnt, rus_cap) for c, cnt in class_counts.items()}
         rus = RandomUnderSampler(sampling_strategy=under_strategy, random_state=random_state)
-        X_tr_rus, y_tr_rus = rus.fit_resample(X_train, y_train)
-
-        actual_k = min(k_neighbors, min(Counter(y_tr_rus).values()) - 1)
+        X_train_rus, y_train_rus = rus.fit_resample(X_train, y_train)
+        actual_k = min(k_neighbors, min(Counter(y_train_rus).values()) - 1)
         kms = KMeansSMOTE(
             cluster_balance_threshold=0.0,
             k_neighbors=max(actual_k, 1),
             kmeans_estimator=MiniBatchKMeans(n_init='auto', random_state=random_state),
             random_state=random_state, n_jobs=1,
         )
-        X_train, y_train = kms.fit_resample(X_tr_rus, y_tr_rus)
-        del X_tr_rus, y_tr_rus, rus, kms; gc.collect()
+        X_train, y_train = kms.fit_resample(X_train_rus, y_train_rus)
+        del X_train_rus, y_train_rus, rus, kms; gc.collect()
 
     print(f"  Final train: {X_train.shape} | Test: {X_test.shape}")
 
@@ -360,9 +362,14 @@ def save_dl_artifacts(
     normal_class_idx: int = 0,
     y_test: np.ndarray = None,
     y_test_pred: np.ndarray = None,
+    selector=None,
+    scaler=None,
+    pca=None,
+    label_encoder=None,
+    model_config: dict = None,
 ):
     """
-    Save model weights, metrics CSV, metrics JSON, confusion matrix, ROC curve.
+    Save model weights, metrics, preprocessing, and architecture metadata.
     """
     if save_dir is None:
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -372,6 +379,23 @@ def save_dl_artifacts(
     # Model weights
     model_path = os.path.join(save_dir, f"{model_name.lower()}_model.pt")
     torch.save(model.state_dict(), model_path)
+    metadata = {
+        'model_name': model_name,
+        'class_names': class_names,
+        'normal_class_idx': normal_class_idx,
+        'model_config': model_config or {},
+    }
+    metadata_path = os.path.join(save_dir, f"{model_name.lower()}_metadata.json")
+    with open(metadata_path, 'w') as f:
+        json.dump(metadata, f, indent=2)
+    for artifact, filename in (
+        (selector, 'mi_selector.joblib'),
+        (scaler, 'scaler.joblib'),
+        (pca, 'pca.joblib'),
+        (label_encoder, 'label_encoder.joblib'),
+    ):
+        if artifact is not None:
+            joblib.dump(artifact, os.path.join(save_dir, filename))
     print(f"  Model saved → {model_path}")
 
     # CV metrics CSV
@@ -402,3 +426,28 @@ def save_dl_artifacts(
 
     # Preprocessing artifacts
     return save_dir
+
+
+def load_dl_artifacts(model: nn.Module, model_name: str, save_dir: str, device=None) -> dict:
+    """Load weights and preprocessing for a caller-constructed DL model."""
+    if device is None:
+        device = torch.device('cpu')
+    stem = model_name.lower()
+    state = torch.load(os.path.join(save_dir, f"{stem}_model.pt"), map_location=device)
+    model.load_state_dict(state)
+    model.to(device).eval()
+
+    def optional_joblib(filename):
+        path = os.path.join(save_dir, filename)
+        return joblib.load(path) if os.path.exists(path) else None
+
+    with open(os.path.join(save_dir, f"{stem}_metadata.json")) as f:
+        metadata = json.load(f)
+    return {
+        'model': model,
+        'selector': optional_joblib('mi_selector.joblib'),
+        'scaler': optional_joblib('scaler.joblib'),
+        'pca': optional_joblib('pca.joblib'),
+        'label_encoder': optional_joblib('label_encoder.joblib'),
+        'metadata': metadata,
+    }

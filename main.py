@@ -100,6 +100,19 @@ def main():
     X_train, X_test, y_train, y_test = split_data(X_processed, y_multi)
     del X_processed
 
+    if not 0 < args.pca_variance <= 1:
+        raise ValueError("--pca-variance must be in the interval (0, 1].")
+    if not 1 <= args.mi_k <= X_train.shape[1]:
+        raise ValueError(
+            f"--mi-k must be between 1 and {X_train.shape[1]} for this dataset."
+        )
+    smallest_class = int(np.bincount(y_train).min())
+    if args.n_splits < 2 or args.n_splits > smallest_class:
+        raise ValueError(
+            f"--n-splits must be between 2 and {smallest_class}, the smallest training-class size."
+        )
+    normal_class_idx = int(np.where(le.classes_ == 'Normal')[0][0])
+
     # ------------------------------------------------------------------
     # Phase 5 — Per-fold CV is handled inside each trainer:
     #   MI fit on fold train → transform fold train + val
@@ -117,6 +130,9 @@ def main():
         n_splits=args.n_splits,
         mi_k=args.mi_k,
         pca_variance=args.pca_variance,
+        balancer=args.balancer,
+        make_plots=not args.skip_plots,
+        normal_class_idx=normal_class_idx,
     )
 
     # ------------------------------------------------------------------
@@ -128,6 +144,9 @@ def main():
         n_splits=args.n_splits,
         mi_k=args.mi_k,
         pca_variance=args.pca_variance,
+        balancer=args.balancer,
+        make_plots=not args.skip_plots,
+        normal_class_idx=normal_class_idx,
     )
 
     # ------------------------------------------------------------------
@@ -139,6 +158,9 @@ def main():
         n_splits=args.n_splits,
         mi_k=args.mi_k,
         pca_variance=args.pca_variance,
+        balancer=args.balancer,
+        make_plots=not args.skip_plots,
+        normal_class_idx=normal_class_idx,
     )
 
     # ------------------------------------------------------------------
@@ -190,7 +212,9 @@ def main():
             balancer=a.balancer,
             k_neighbors=3,
         )
-        save_experiment_config(cfg, save_dir="results/corrected_pipeline")
+        save_experiment_config(
+            cfg, save_dir=f"results/corrected_pipeline/{name.lower()}"
+        )
 
     print("\nPipeline complete.")
 

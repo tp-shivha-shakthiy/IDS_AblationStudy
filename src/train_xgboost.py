@@ -30,13 +30,13 @@ from src.evaluation import (plot_confusion_matrix, plot_feature_importance,
 MODEL_NAME = "XGBoost"
 
 
-def _train_and_evaluate(X_tr, y_tr, X_val, y_val):
+def _train_and_evaluate(X_tr, y_tr, X_val, y_val, random_state=42):
     """Train XGBoost on balanced data, return metrics dict."""
     model = XGBClassifier(
         n_estimators=30, subsample=0.1, max_depth=3, min_child_weight=20,
         gamma=0.2, learning_rate=0.05, colsample_bytree=0.1, reg_alpha=0.5,
         use_label_encoder=False, eval_metric='mlogloss',
-        tree_method='hist', random_state=42, verbosity=0,
+        tree_method='hist', random_state=random_state, verbosity=0,
     )
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
@@ -70,6 +70,9 @@ def train_and_evaluate(
     pca_variance: float = 0.95,
     k_neighbors: int = 3,
     random_state: int = 42,
+    balancer: str = "kmeans",
+    make_plots: bool = True,
+    normal_class_idx: int = 0,
 ) -> dict:
     """
     Full XGBoost pipeline: CV → final retrain → test eval.
@@ -88,7 +91,7 @@ def train_and_evaluate(
         n_estimators=30, subsample=0.1, max_depth=3, min_child_weight=20,
         gamma=0.2, learning_rate=0.05, colsample_bytree=0.1, reg_alpha=0.5,
         use_label_encoder=False, eval_metric='mlogloss',
-        tree_method='hist', random_state=42, verbosity=0,
+        tree_method='hist', random_state=random_state, verbosity=0,
     )
 
     # --- Step 1: Per-fold CV (MI + Scaler + PCA + K-means SMOTE inside) ---
@@ -102,7 +105,8 @@ def train_and_evaluate(
         pca_variance=pca_variance,
         k_neighbors=k_neighbors,
         random_state=random_state,
-        strategy="kmeans",
+        strategy=balancer,
+        normal_class_idx=normal_class_idx,
     )
 
     print(f"\n  CV Results ({MODEL_NAME}):")
@@ -126,15 +130,19 @@ def train_and_evaluate(
     print(f"    PCA components: {X_train_p.shape[1]}")
 
     X_train_b, y_train_b = balance_full_train(
-        X_train_p, y_train, strategy="kmeans",
+        X_train_p, y_train, strategy=balancer,
         k_neighbors=k_neighbors, random_state=random_state,
     )
 
     X_test_p = pca.transform(scaler.transform(X_test_mi))
 
     model, test_metrics, y_test_pred = _train_and_evaluate(
-        X_train_b, y_train_b, X_test_p, y_test,
+        X_train_b, y_train_b, X_test_p, y_test, random_state=random_state,
     )
+    y_test_binary = (y_test != normal_class_idx).astype(int)
+    y_pred_binary = (y_test_pred != normal_class_idx).astype(int)
+    test_metrics['binary_accuracy'] = accuracy_score(y_test_binary, y_pred_binary)
+    test_metrics['binary_f1'] = f1_score(y_test_binary, y_pred_binary, zero_division=0)
 
     print(f"\n  {MODEL_NAME} Test Metrics:")
     for k, v in test_metrics.items():
@@ -148,20 +156,21 @@ def train_and_evaluate(
     joblib.dump(model, model_path)
     print(f"\n  Model saved → {model_path}")
 
-    plot_confusion_matrix(
-        y_test, y_test_pred, class_names,
-        normal_class_idx=0, save_dir=save_dir,
-        prefix=f"{MODEL_NAME.lower()}_",
-    )
-    plot_roc_curve(
-        model, X_test_mi, y_test, class_names,
-        scaler=scaler, pca=pca,
-        title=f"{MODEL_NAME} ROC Curve (Test Set)",
-        save_dir=save_dir, prefix=f"{MODEL_NAME.lower()}_",
-    )
-    plot_feature_importance(
-        model, n_components=X_train_p.shape[1], save_dir=save_dir,
-    )
+    if make_plots:
+        plot_confusion_matrix(
+            y_test, y_test_pred, class_names,
+            normal_class_idx=normal_class_idx, save_dir=save_dir,
+            prefix=f"{MODEL_NAME.lower()}_",
+        )
+        plot_roc_curve(
+            model, X_test_mi, y_test, class_names,
+            scaler=scaler, pca=pca,
+            title=f"{MODEL_NAME} ROC Curve (Test Set)",
+            save_dir=save_dir, prefix=f"{MODEL_NAME.lower()}_",
+        )
+        plot_feature_importance(
+            model, n_components=X_train_p.shape[1], save_dir=save_dir,
+        )
 
     results = {
         'model': model,

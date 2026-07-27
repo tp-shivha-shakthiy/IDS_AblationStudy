@@ -39,7 +39,8 @@ from src.balancing import balance_training_fold
 # ===================================================================
 
 def train_and_score_fold(model, X_tr, y_tr, X_val, y_val,
-                         use_sample_weight: bool = False):
+                         use_sample_weight: bool = False,
+                         normal_class_idx=None):
     """
     Fit *model* on (X_tr, y_tr) and score on (X_val, y_val).
 
@@ -76,8 +77,16 @@ def train_and_score_fold(model, X_tr, y_tr, X_val, y_val,
     except Exception:
         pass
 
-    return {'accuracy': acc, 'precision': prec, 'recall': rec,
-            'f1': f1, 'auc': auc}
+    metrics = {'accuracy': acc, 'precision': prec, 'recall': rec,
+               'f1': f1, 'auc': auc}
+    if normal_class_idx is not None:
+        y_val_binary = (y_val != normal_class_idx).astype(int)
+        y_pred_binary = (y_pred != normal_class_idx).astype(int)
+        metrics['binary_accuracy'] = accuracy_score(y_val_binary, y_pred_binary)
+        metrics['binary_f1'] = f1_score(
+            y_val_binary, y_pred_binary, zero_division=0,
+        )
+    return metrics
 
 
 # ===================================================================
@@ -97,6 +106,7 @@ def run_cv(
     use_sample_weight: bool = False,
     strategy: str = "kmeans",
     n_clusters: int = 20,
+    normal_class_idx=None,
 ):
     """
     Run Stratified K-Fold CV with per-fold leakage-free preprocessing.
@@ -137,6 +147,8 @@ def run_cv(
         'accuracy': [], 'precision': [], 'recall': [],
         'f1': [], 'auc': [],
     }
+    if normal_class_idx is not None:
+        metrics.update({'binary_accuracy': [], 'binary_f1': []})
 
     selector, scaler, pca = None, None, None
 
@@ -180,6 +192,7 @@ def run_cv(
         fold_metrics = train_and_score_fold(
             model, X_tr_b, y_tr_b, X_val_p, y_val,
             use_sample_weight=use_sample_weight,
+            normal_class_idx=normal_class_idx,
         )
 
         for k in metrics:
