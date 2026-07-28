@@ -25,7 +25,7 @@ from sklearn.model_selection import StratifiedKFold
 from src.dl_pipeline import (
     set_seeds, get_device, load_data,
     preprocess_fold, preprocess_final,
-    evaluate_with_proba, save_dl_artifacts,
+    evaluate_with_proba, get_probabilities, save_dl_artifacts,
 )
 
 set_seeds(42)
@@ -131,10 +131,7 @@ def main(data_dir="data/raw"):
                 loss.backward()
                 optimizer.step()
 
-        model.eval()
-        with torch.no_grad():
-            _, multi_out = model(X_val_t.to(device))
-            y_proba = torch.softmax(multi_out, dim=1).cpu().numpy()
+        y_proba = get_probabilities(model, X_val_t, device)
         preds_multi = np.argmax(y_proba, axis=1)
 
         metrics = evaluate_with_proba(y_val, preds_multi, y_proba, normal_class_idx)
@@ -183,10 +180,7 @@ def main(data_dir="data/raw"):
             optimizer.step()
 
     # --- Test evaluation ---
-    final_model.eval()
-    with torch.no_grad():
-        _, multi_out = final_model(X_te_t.to(device))
-        y_proba = torch.softmax(multi_out, dim=1).cpu().numpy()
+    y_proba = get_probabilities(final_model, X_te_t, device)
     test_preds = np.argmax(y_proba, axis=1)
 
     test_metrics = evaluate_with_proba(y_test, test_preds, y_proba, normal_class_idx)

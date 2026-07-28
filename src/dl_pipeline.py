@@ -363,13 +363,31 @@ def evaluate_with_proba(
     return metrics
 
 
-def get_probabilities(model, X_tensor, device):
-    """Run forward pass and return class probabilities as numpy array."""
+def get_probabilities(model, X_tensor, device, batch_size: int = 4096):
+    """Run memory-bounded inference and return class probabilities.
+
+    Validation and test partitions in UNSW-NB15 contain hundreds of thousands
+    of rows.  Moving them to CUDA in one LSTM call can exhaust the caching
+    allocator, even when training itself uses small DataLoader batches.
+    """
+    if batch_size < 1:
+        raise ValueError("batch_size must be at least 1")
+
     model.eval()
+    probabilities = []
     with torch.no_grad():
-        logits = model(X_tensor.to(device))
-        proba = torch.softmax(logits, dim=1).cpu().numpy()
-    return proba
+        for start in range(0, len(X_tensor), batch_size):
+            batch = X_tensor[start:start + batch_size].to(device)
+            logits = model(batch)
+            # Multi-task models return (binary_logits, multiclass_logits).
+            # Metrics in this helper use the multiclass prediction head.
+            if isinstance(logits, tuple):
+                logits = logits[-1]
+            probabilities.append(torch.softmax(logits, dim=1).cpu())
+
+    if not probabilities:
+        return np.empty((0, 0), dtype=np.float32)
+    return torch.cat(probabilities, dim=0).numpy()
 
 
 # ---------------------------------------------------------------------------
