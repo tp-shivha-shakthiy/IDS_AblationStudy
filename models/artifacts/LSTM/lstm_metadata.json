@@ -1,0 +1,21 @@
+{
+  "model_name": "LSTM",
+  "class_names": [
+    "Analysis",
+    "Backdoor",
+    "DoS",
+    "Exploits",
+    "Fuzzers",
+    "Generic",
+    "Normal",
+    "Reconnaissance",
+    "Shellcode",
+    "Worms"
+  ],
+  "normal_class_idx": 6,
+  "model_config": {
+    "input_dim": 15,
+    "output_dim": 10,
+    "hidden_dim": 32
+  }
+}
