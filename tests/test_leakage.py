@@ -644,10 +644,9 @@ class TestFinalRetrainingIntegrity:
 
     def test_final_retrain_uses_full_train_not_fold(self, split_dataset):
         """Final retraining must fit MI/Scaler/PCA on full X_train, not a fold."""
-        from src.feature_selection import SelectKBest
+        from sklearn.feature_selection import SelectKBest, mutual_info_classif
         from sklearn.preprocessing import StandardScaler
         from sklearn.decomposition import PCA
-        from sklearn.feature_selection import mutual_info_classif
 
         X_train, X_test, y_train, y_test = split_dataset
 

@@ -12,6 +12,7 @@ Pipeline (leakage-free):
 import numpy as np
 import gc
 import os
+import json
 import warnings
 import joblib
 from xgboost import XGBClassifier
@@ -155,6 +156,11 @@ def train_and_evaluate(
     model_path = os.path.join(save_dir, f"{MODEL_NAME.lower()}_model.joblib")
     joblib.dump(model, model_path)
     print(f"\n  Model saved → {model_path}")
+
+    test_metrics_path = os.path.join(save_dir, "test_metrics.json")
+    with open(test_metrics_path, 'w') as f:
+        json.dump(test_metrics, f, indent=2)
+    print(f"  Test metrics saved → {test_metrics_path}")
 
     if make_plots:
         plot_confusion_matrix(

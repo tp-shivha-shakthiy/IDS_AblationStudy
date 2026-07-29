@@ -76,14 +76,9 @@ data/raw/UNSW-NB15_{1..4}.csv
   - Drop metadata columns (id, label, stime, ltime, srcip, dstip)
   - LabelEncode categorical features
   - Log1p normalization (clip → log1p → fillna → float32)
-         │
-         ▼
-[Phase 4a] src/feature_selection.py
-  - 5% stratified sample for Mutual Information score estimation
-  - SelectKBest(mutual_info_classif, k=15)
-         │
-         ▼
-[Phase 4b+5] src/dimensionality_reduction.py
+          │
+          ▼
+[Phase 4] src/dimensionality_reduction.py
   - Stratified 80/20 train/test split (X_test is LOCKED)
   - StandardScaler and PCA applied inside CV folds only
          │
@@ -179,7 +174,6 @@ INTRUSION-DETECTION-SYSTEM/
 │
 ├── src/                                 Shared pipeline modules + sklearn trainers
 │   ├── preprocessing.py                 Load, clean, encode, log1p normalization
-│   ├── feature_selection.py             Mutual Information SelectKBest
 │   ├── dimensionality_reduction.py      Stratified 80/20 split
 │   ├── balancing.py                     SMOTE / KMeansSMOTE per fold
 │   ├── cross_validation.py              StratifiedKFold CV runner
@@ -232,7 +226,6 @@ INTRUSION-DETECTION-SYSTEM/
 │
 └── results/                             Output metrics and reports
     ├── model_comparison.csv             Blind holdout metrics (sklearn models)
-    ├── model_comparison.xlsx            Same, Excel format
     ├── metrics.csv                      Per-fold CV metrics
     ├── hgb_per_class_report.csv
     ├── xgboost_per_class_report.csv
@@ -250,7 +243,6 @@ INTRUSION-DETECTION-SYSTEM/
 | Module | Purpose | Key Details |
 |---|---|---|
 | `preprocessing.py` | Data loading + cleaning | Reads 4 CSVs (47/49 col variants), maps attack categories, drops metadata, LabelEncodes objects, applies log1p normalization. Returns float32 arrays. |
-| `feature_selection.py` | MI-based feature selection | 5% stratified sample for Mutual Information via `SelectKBest`. Default k=15 for sklearn, k=30 for DL. |
 | `dimensionality_reduction.py` | Train/test split | Stratified 80/20 split only. Scaler/PCA moved inside CV loop to prevent leakage. |
 | `balancing.py` | Class imbalance handling | Two strategies: `"kmeans"` (KMeansSMOTE + MiniBatchKMeans) and `"smote"` (plain SMOTE). Applied only to training data. Handles edge cases (minority_count < 2). |
 | `cross_validation.py` | Stratified CV runner | Per fold: fits MI selector, StandardScaler, PCA, and balancer on fold train. Returns per-fold metrics + last fold's transformers for test evaluation. |
