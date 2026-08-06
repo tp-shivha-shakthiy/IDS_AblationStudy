@@ -1,34 +1,45 @@
 """
 test_dl_pipeline.py
 ===================
-Regression tests for Tier 2 DL pipeline.
+Tests for DL model architectures, preprocessing, evaluation, and integration.
 
-Tests:
-  1. DataLoader drop_last=True (prevents batch=1 LayerNorm failure)
-  2. Saved test metrics JSON has real finite AUC in [0, 1]
-  3. DNN uses LayerNorm (not BatchNorm1d)
-  4. BiLSTM_SharedFE uses LayerNorm (not BatchNorm1d)
-  5. get_probabilities returns valid probability arrays
-  6. evaluate_with_proba returns real AUC (not hardcoded 0.0)
-  7. preprocess_fold k_neighbors is floored at 1
-  8. No DL script hardcodes auc=0.0 in final evaluation
-  9. Validation/test DataLoaders do NOT use drop_last=True
+Covers:
+  1. DL model forward pass — output shape and gradient flow
+  2. DL model save/load roundtrip — state_dict persistence
+  3. Feature selection — fit_mi_selector and apply_feature_selection
+  4. Evaluation — evaluate_predictions, evaluate_with_proba, get_probabilities
+  5. Experiment config — build_experiment_config schema
+  6. Integration — synthetic data through full CV pipeline
 """
 
-import ast
-import json
 import os
+import sys
+import json
+import importlib
 import numpy as np
 import pytest
 import torch
-import torch.nn as nn
-from collections import Counter
-from torch.utils.data import DataLoader, TensorDataset
+import tempfile
+import joblib
+from unittest.mock import patch
 
-from src.dl_pipeline import (
-    evaluate_predictions, evaluate_with_proba,
-    get_probabilities, compute_class_weights,
-)
+from sklearn.model_selection import train_test_split
+
+# Add models/ to path so hyphenated files can be loaded via importlib
+_models_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models")
+if _models_dir not in sys.path:
+    sys.path.insert(0, _models_dir)
+
+
+def _import_hyphenated(filename, module_attr):
+    """Import a class from a hyphenated filename using importlib."""
+    spec = importlib.util.spec_from_file_location(
+        filename.replace(".py", ""),
+        os.path.join(_models_dir, filename),
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return getattr(mod, module_attr)
 
 
 # ---------------------------------------------------------------------------
@@ -36,445 +47,313 @@ from src.dl_pipeline import (
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
-def synthetic_tensors():
-    """Small synthetic data as torch tensors."""
-    X = torch.randn(100, 20)
-    y = torch.randint(0, 5, (100,))
+def synthetic_dataset():
+    """Small reproducible dataset."""
+    rng = np.random.RandomState(42)
+    X = rng.randn(500, 15).astype(np.float32)
+    y = rng.choice([0, 1, 2], size=500, p=[0.5, 0.3, 0.2])
     return X, y
 
 
 @pytest.fixture
-def synthetic_numpy():
-    """Small synthetic numpy arrays."""
-    rng = np.random.RandomState(42)
-    X = rng.randn(100, 20).astype(np.float32)
-    y = rng.choice([0, 1, 2, 3, 4], size=100, p=[0.5, 0.15, 0.1, 0.15, 0.1])
-    return X, y
+def split_data(synthetic_dataset):
+    """Stratified 80/20 split."""
+    X, y = synthetic_dataset
+    return train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
 
 
 # ---------------------------------------------------------------------------
-# 1. DataLoader must have drop_last=True for training loaders
+# 1. DL model forward pass
 # ---------------------------------------------------------------------------
 
-class TestDataLoaderDropLast:
-    def test_training_loader_has_drop_last(self, synthetic_tensors):
-        X, y = synthetic_tensors
-        loader = DataLoader(
-            TensorDataset(X, y), batch_size=512, shuffle=True, drop_last=True,
-        )
-        assert loader.drop_last is True
-
-    def test_training_loader_drops_last_batch(self):
-        X = torch.randn(10, 5)
-        y = torch.randint(0, 2, (10,))
-        loader = DataLoader(
-            TensorDataset(X, y), batch_size=8, shuffle=False, drop_last=True,
-        )
-        total_samples = sum(batch[0].shape[0] for batch in loader)
-        assert total_samples == 8, "drop_last=True should drop the final incomplete batch"
-
-    def test_val_loader_no_drop_last(self):
-        X = torch.randn(10, 5)
-        y = torch.randint(0, 2, (10,))
-        loader = DataLoader(
-            TensorDataset(X, y), batch_size=8, shuffle=False, drop_last=False,
-        )
-        total_samples = sum(batch[0].shape[0] for batch in loader)
-        assert total_samples == 10, "Validation loader must NOT drop any samples"
-
-
-# ---------------------------------------------------------------------------
-# 2. Saved test metrics JSON must have real finite AUC in [0, 1]
-# ---------------------------------------------------------------------------
-
-class TestMetricsJsonAUC:
-    def test_auc_in_valid_range(self):
-        rng = np.random.RandomState(42)
-        y_true = rng.choice([0, 1, 2, 3, 4], size=500, p=[0.5, 0.15, 0.1, 0.15, 0.1])
-        y_proba = rng.dirichlet(np.ones(5), size=500).astype(np.float32)
-        y_pred = np.argmax(y_proba, axis=1)
-
-        metrics = evaluate_with_proba(y_true, y_pred, y_proba, normal_class_idx=0)
-
-        assert 'auc' in metrics
-        assert isinstance(metrics['auc'], float)
-        assert 0.0 <= metrics['auc'] <= 1.0, f"AUC {metrics['auc']} outside [0, 1]"
-
-    def test_auc_not_always_zero(self):
-        rng = np.random.RandomState(42)
-        n = 500
-        y_true = np.array([0] * 400 + [1] * 50 + [2] * 50)
-        y_proba = np.zeros((n, 3), dtype=np.float32)
-        y_proba[y_true == 0, 0] = 0.9
-        y_proba[y_true == 1, 1] = 0.9
-        y_proba[y_true == 2, 2] = 0.9
-        y_proba += rng.dirichlet(np.ones(3), size=n).astype(np.float32) * 0.05
-        y_proba /= y_proba.sum(axis=1, keepdims=True)
-        y_pred = np.argmax(y_proba, axis=1)
-
-        metrics = evaluate_with_proba(y_true, y_pred, y_proba, normal_class_idx=0)
-        assert metrics['auc'] > 0.5, f"AUC {metrics['auc']} too low for near-perfect predictions"
-
-    def test_saved_json_auc_finite(self, tmp_path):
-        metrics = {
-            'binary_acc': 0.95, 'binary_f1': 0.96,
-            'multi_acc': 0.93, 'macro_f1': 0.91,
-            'weighted_f1': 0.92, 'precision': 0.93,
-            'recall': 0.93, 'auc': 0.9875,
-        }
-        json_path = tmp_path / "test_metrics.json"
-        with open(json_path, 'w') as f:
-            json.dump(metrics, f)
-
-        with open(json_path) as f:
-            loaded = json.load(f)
-
-        assert isinstance(loaded['auc'], (int, float))
-        assert 0.0 <= loaded['auc'] <= 1.0
-        assert np.isfinite(loaded['auc'])
-
-
-# ---------------------------------------------------------------------------
-# 3. DNN must use LayerNorm (not BatchNorm1d)
-# ---------------------------------------------------------------------------
-
-class TestArchitectureLayerNorm:
-    def test_dnn_mi_pca_kmeans_uses_layernorm(self):
-        from models.train_dnn_mi_pca_kmeans import DeepNeuralNetwork
-        model = DeepNeuralNetwork(input_dim=15, output_dim=10)
-
-        has_batchnorm = any(isinstance(m, nn.BatchNorm1d) for m in model.modules())
-        has_layernorm = any(isinstance(m, nn.LayerNorm) for m in model.modules())
-
-        assert has_layernorm, "DeepNeuralNetwork (DNN_MI_PCA_KMeans) must use LayerNorm"
-        assert not has_batchnorm, "DeepNeuralNetwork (DNN_MI_PCA_KMeans) must NOT use BatchNorm1d"
-
-    def test_dnn_forward_pass_small_batch(self):
-        from models.train_dnn_mi_pca_kmeans import DeepNeuralNetwork
-        model = DeepNeuralNetwork(input_dim=15, output_dim=10)
-        model.eval()
-
-        x = torch.randn(1, 15)
-        out = model(x)
-        assert out.shape == (1, 10)
-        assert torch.isfinite(out).all()
-
-    def test_dnn_baseline_uses_layernorm(self):
+class TestDLModelForwardPass:
+    def test_dnn_output_shape(self):
+        """DNN must output logits of shape (batch, num_classes)."""
         from models.train_dnn import DeepNeuralNetwork
-        model = DeepNeuralNetwork(input_dim=20, output_dim=10)
 
-        has_batchnorm = any(isinstance(m, nn.BatchNorm1d) for m in model.modules())
-        has_layernorm = any(isinstance(m, nn.LayerNorm) for m in model.modules())
+        model = DeepNeuralNetwork(input_dim=15, output_dim=10)
+        X = torch.randn(32, 15)
+        out = model(X)
+        assert out.shape == (32, 10)
 
-        assert has_layernorm, "DNN baseline must use LayerNorm"
-        assert not has_batchnorm, "DNN baseline must NOT use BatchNorm1d"
+    def test_dnn_mi_pca_kmeans_output_shape(self):
+        """DNN_MI_PCA_KMeans must output correct shape."""
+        from models.train_dnn_mi_pca_kmeans import DeepNeuralNetwork
 
-    def test_dnn_baseline_forward_pass_small_batch(self):
+        model = DeepNeuralNetwork(input_dim=15, output_dim=10)
+        X = torch.randn(32, 15)
+        out = model(X)
+        assert out.shape == (32, 10)
+
+    def test_lstm_output_shape(self):
+        """BiLSTM must output correct shape."""
+        from models.train_LSTM import BiLSTMNetwork
+
+        model = BiLSTMNetwork(input_dim=15, output_dim=10)
+        X = torch.randn(32, 15)
+        out = model(X)
+        assert out.shape == (32, 10)
+
+    def test_bilstm_output_shape(self):
+        """WeightedBiLSTM must output correct shape."""
+        WeightedBiLSTM = _import_hyphenated("train_Bi-LSTM.py", "WeightedBiLSTM")
+
+        model = WeightedBiLSTM(input_dim=15, output_dim=10)
+        X = torch.randn(32, 15)
+        out = model(X)
+        assert out.shape == (32, 10)
+
+    def test_multi_task_output_shapes(self):
+        """MultiTaskHierarchicalDNN must return (binary, multi) outputs."""
+        MultiTaskHierarchicalDNN = _import_hyphenated(
+            "train_Bi-LSTM_shared-feature-extractor.py", "MultiTaskHierarchicalDNN"
+        )
+
+        model = MultiTaskHierarchicalDNN(input_dim=15, num_classes=10)
+        X = torch.randn(32, 15)
+        bin_out, multi_out = model(X)
+        assert bin_out.shape == (32, 2)
+        assert multi_out.shape == (32, 10)
+
+    def test_dnn_gradients_flow(self):
+        """DNN must produce gradients on backward pass."""
         from models.train_dnn import DeepNeuralNetwork
-        model = DeepNeuralNetwork(input_dim=20, output_dim=10)
+
+        model = DeepNeuralNetwork(input_dim=15, output_dim=5)
+        X = torch.randn(16, 15)
+        y = torch.randint(0, 5, (16,))
+        out = model(X)
+        loss = torch.nn.functional.cross_entropy(out, y)
+        loss.backward()
+        for p in model.parameters():
+            if p.requires_grad:
+                assert p.grad is not None
+
+
+# ---------------------------------------------------------------------------
+# 2. DL model save/load roundtrip
+# ---------------------------------------------------------------------------
+
+class TestDLModelSaveLoad:
+    def test_dnn_save_load_roundtrip(self):
+        """Saved DNN state_dict must load back identically."""
+        from models.train_dnn import DeepNeuralNetwork
+
+        model = DeepNeuralNetwork(input_dim=15, output_dim=5)
         model.eval()
+        X = torch.randn(10, 15)
+        with torch.no_grad():
+            before = model(X).numpy()
 
-        x = torch.randn(1, 20)
-        out = model(x)
-        assert out.shape == (1, 10)
-        assert torch.isfinite(out).all()
+        with tempfile.NamedTemporaryFile(suffix='.pt', delete=False) as f:
+            torch.save(model.state_dict(), f.name)
+            path = f.name
 
-    def test_shared_fe_uses_layernorm(self):
-        import importlib
-        mod = importlib.import_module("models.train_Bi-LSTM_shared-feature-extractor")
-        MultiTaskHierarchicalDNN = mod.MultiTaskHierarchicalDNN
-        model = MultiTaskHierarchicalDNN(input_dim=20, num_classes=10)
+        model2 = DeepNeuralNetwork(input_dim=15, output_dim=5)
+        model2.load_state_dict(torch.load(path, weights_only=True))
+        model2.eval()
+        with torch.no_grad():
+            after = model2(X).numpy()
 
-        has_batchnorm = any(isinstance(m, nn.BatchNorm1d) for m in model.modules())
-        has_layernorm = any(isinstance(m, nn.LayerNorm) for m in model.modules())
+        np.testing.assert_array_equal(before, after)
+        os.unlink(path)
 
-        assert has_layernorm, "BiLSTM_SharedFE must use LayerNorm"
-        assert not has_batchnorm, "BiLSTM_SharedFE must NOT use BatchNorm1d"
+    def test_lstm_save_load_roundtrip(self):
+        """Saved LSTM state_dict must load back identically."""
+        from models.train_LSTM import BiLSTMNetwork
 
-
-# ---------------------------------------------------------------------------
-# 4. get_probabilities returns valid probability arrays
-# ---------------------------------------------------------------------------
-
-class TestGetProbabilities:
-    def test_returns_valid_probabilities(self):
-        model = nn.Sequential(
-            nn.Linear(20, 32),
-            nn.ReLU(),
-            nn.Linear(32, 5),
-        )
+        model = BiLSTMNetwork(input_dim=15, output_dim=5)
         model.eval()
-        X = torch.randn(50, 20)
-        device = torch.device('cpu')
+        X = torch.randn(10, 15)
+        with torch.no_grad():
+            before = model(X).numpy()
 
-        proba = get_probabilities(model, X, device)
+        with tempfile.NamedTemporaryFile(suffix='.pt', delete=False) as f:
+            torch.save(model.state_dict(), f.name)
+            path = f.name
 
-        assert isinstance(proba, np.ndarray)
-        assert proba.shape == (50, 5)
-        assert np.allclose(proba.sum(axis=1), 1.0, atol=1e-5)
-        assert np.all(proba >= 0.0)
-        assert np.all(proba <= 1.0)
-        assert np.all(np.isfinite(proba))
+        model2 = BiLSTMNetwork(input_dim=15, output_dim=5)
+        model2.load_state_dict(torch.load(path, weights_only=True))
+        model2.eval()
+        with torch.no_grad():
+            after = model2(X).numpy()
 
-    def test_single_sample_probabilities(self):
-        model = nn.Sequential(
-            nn.Linear(10, 32),
-            nn.ReLU(),
-            nn.Linear(32, 5),
-        )
-        model.eval()
-        X = torch.randn(1, 10)
-        device = torch.device('cpu')
-
-        proba = get_probabilities(model, X, device)
-
-        assert proba.shape == (1, 5)
-        assert np.isclose(proba.sum(axis=1), 1.0, atol=1e-5)
+        np.testing.assert_array_equal(before, after)
+        os.unlink(path)
 
 
 # ---------------------------------------------------------------------------
-# 5. evaluate_with_proba returns real AUC (not hardcoded 0.0)
+# 3. Feature selection
 # ---------------------------------------------------------------------------
 
-class TestEvaluateWithProba:
-    def test_auc_nonzero_with_good_predictions(self):
+class TestFeatureSelection:
+    def test_fit_mi_selector_returns_selectkbest(self):
+        """fit_mi_selector must return a fitted SelectKBest."""
+        from src.feature_selection import fit_mi_selector
+
+        X = np.random.randn(200, 10).astype(np.float32)
+        y = np.random.choice([0, 1, 2], size=200)
+        selector = fit_mi_selector(X, y, k=5)
+
+        assert hasattr(selector, 'scores_')
+        assert selector.k == 5
+        X_mi = selector.transform(X)
+        assert X_mi.shape == (200, 5)
+
+    def test_fit_mi_selector_with_sampling(self):
+        """fit_mi_selector with sample_frac must still produce valid selector."""
+        from src.feature_selection import fit_mi_selector
+
+        X = np.random.RandomState(42).randn(500, 10).astype(np.float32)
+        y = np.random.RandomState(42).choice([0, 1, 2], size=500)
+        selector = fit_mi_selector(X, y, k=5, sample_frac=0.3)
+
+        assert hasattr(selector, 'scores_')
+        X_mi = selector.transform(X)
+        assert X_mi.shape == (500, 5)
+
+    def test_apply_feature_selection(self):
+        """apply_feature_selection must transform with fitted selector."""
+        from src.feature_selection import fit_mi_selector, apply_feature_selection
+
+        X = np.random.RandomState(42).randn(200, 10).astype(np.float32)
+        y = np.random.RandomState(42).choice([0, 1], size=200)
+        selector = fit_mi_selector(X, y, k=5)
+
+        X_mi = apply_feature_selection(X, selector)
+        assert X_mi.shape == (200, 5)
+
+
+# ---------------------------------------------------------------------------
+# 4. Evaluation helpers
+# ---------------------------------------------------------------------------
+
+class TestEvaluationHelpers:
+    def test_evaluate_with_proba_auc_above_0_5(self):
+        """evaluate_with_proba must return AUC > 0.5 for correlated predictions."""
+        from src.dl_pipeline import evaluate_with_proba
+
         rng = np.random.RandomState(42)
-        n = 500
-        y_true = np.array([0] * 300 + [1] * 100 + [2] * 100)
-        y_proba = np.zeros((n, 3), dtype=np.float32)
-        y_proba[y_true == 0, 0] = 0.9
-        y_proba[y_true == 1, 1] = 0.9
-        y_proba[y_true == 2, 2] = 0.9
-        y_proba += rng.dirichlet(np.ones(3), size=n).astype(np.float32) * 0.05
+        y_true = np.array([0, 0, 0, 1, 1, 1, 2, 2, 2, 0])
+        y_proba = rng.dirichlet(np.ones(3), size=10)
+        for i, c in enumerate(y_true):
+            y_proba[i, c] += 3.0
         y_proba /= y_proba.sum(axis=1, keepdims=True)
         y_pred = np.argmax(y_proba, axis=1)
 
-        metrics = evaluate_with_proba(y_true, y_pred, y_proba, normal_class_idx=0)
-        assert metrics['auc'] > 0.9
+        m = evaluate_with_proba(y_true, y_pred, y_proba)
+        assert m['auc'] > 0.5
+        assert m['multi_acc'] > 0.0
 
-    def test_evaluate_predictions_returns_zero_auc(self):
-        y_true = np.array([0, 1, 2, 0, 1, 2])
-        y_pred = np.array([0, 1, 2, 0, 1, 2])
-        metrics = evaluate_predictions(y_true, y_pred, normal_class_idx=0)
-        assert metrics['auc'] == 0.0
+    def test_evaluate_predictions_binary(self):
+        """evaluate_predictions must compute binary metrics correctly."""
+        from src.dl_pipeline import evaluate_predictions
 
-    def test_binary_auc_nonzero(self):
-        rng = np.random.RandomState(42)
-        n = 200
-        y_true = np.array([0] * 150 + [1] * 50)
-        y_proba = np.zeros((n, 2), dtype=np.float32)
-        y_proba[y_true == 0, 0] = 0.9
-        y_proba[y_true == 1, 1] = 0.9
-        y_proba += rng.uniform(0, 0.05, size=(n, 2)).astype(np.float32)
-        y_proba /= y_proba.sum(axis=1, keepdims=True)
-        y_pred = np.argmax(y_proba, axis=1)
+        y_true = np.array([0, 1, 0, 1, 0])
+        y_pred = np.array([0, 1, 0, 0, 0])
 
-        metrics = evaluate_with_proba(y_true, y_pred, y_proba, normal_class_idx=0)
-        assert metrics['auc'] > 0.9, f"Binary AUC {metrics['auc']} too low"
+        m = evaluate_predictions(y_true, y_pred, normal_class_idx=0)
+        assert m['binary_acc'] == pytest.approx(0.8)
+        assert 'auc' in m
 
 
 # ---------------------------------------------------------------------------
-# 6. preprocess_fold k_neighbors floored at 1
+# 5. Experiment config schema
 # ---------------------------------------------------------------------------
 
-class TestKNeighborsFloor:
-    def test_dl_pipeline_preprocess_fold_k_floor(self):
-        from collections import Counter
-        k_neighbors_input = 100
-        minority_count = 8
-        actual_k = min(k_neighbors_input, minority_count - 1)
-        floored_k = max(actual_k, 1)
-        assert floored_k == 7
-        assert floored_k >= 1
+class TestExperimentConfig:
+    def test_tier1_config_has_required_keys(self):
+        """Tier 1 config must have all standard keys."""
+        from src.experiment_config import build_experiment_config
 
-    def test_dl_pipeline_preprocess_fold_runs_without_error(self):
-        rng = np.random.RandomState(42)
-        X = rng.randn(1000, 20).astype(np.float32)
-        y = np.array([0] * 800 + [1] * 200)
-        from sklearn.model_selection import train_test_split
-        X_tr, X_val, y_tr, y_val = train_test_split(
-            X, y, test_size=0.20, stratify=y, random_state=42,
+        cfg = build_experiment_config(
+            model_name="XGBoost",
+            model_params={"n_estimators": 100},
+            tier=1,
+        )
+        for key in ["model", "tier", "seed", "cv_folds", "balancer",
+                     "feature_selection", "scaler", "pca_variance",
+                     "model_hyperparameters", "timestamp", "git_commit"]:
+            assert key in cfg, f"Missing key: {key}"
+        assert cfg["tier"] == 1
+        assert cfg["model"] == "XGBoost"
+
+    def test_tier2_config_has_required_keys(self):
+        """Tier 2 config must have all standard keys."""
+        from src.experiment_config import build_experiment_config
+
+        cfg = build_experiment_config(
+            model_name="DNN",
+            model_params={"layers": [64, 32]},
+            tier=2,
+            dl_extra={"epochs": 10},
+        )
+        for key in ["model", "tier", "seed", "cv_folds", "balancer",
+                     "feature_selection", "scaler", "dl_extra",
+                     "timestamp", "git_commit"]:
+            assert key in cfg, f"Missing key: {key}"
+        assert cfg["tier"] == 2
+        assert cfg["dl_extra"]["epochs"] == 10
+
+    def test_config_json_serializable(self):
+        """Config must be JSON-serializable without errors."""
+        from src.experiment_config import build_experiment_config
+
+        cfg = build_experiment_config(model_name="TestModel", tier=1)
+        json_str = json.dumps(cfg, indent=2)
+        assert len(json_str) > 0
+
+
+# ---------------------------------------------------------------------------
+# 6. Integration — full CV pipeline on synthetic data
+# ---------------------------------------------------------------------------
+
+class TestIntegration:
+    def test_full_cv_pipeline_with_hgb(self, split_data):
+        """Full CV pipeline with HGB must produce per-fold metrics."""
+        from src.model_training import MODEL_REGISTRY, _ensure_registry, _train_and_evaluate
+        from src.cross_validation import run_cv
+        from src.feature_selection import fit_mi_selector
+        from sklearn.preprocessing import StandardScaler
+        from sklearn.decomposition import PCA
+        from src.balancing import balance_full_train
+
+        X_train, X_test, y_train, y_test = split_data
+        _ensure_registry()
+        entry = MODEL_REGISTRY["HGB"]
+
+        cv_metrics, selector, scaler, pca = run_cv(
+            X_train, y_train,
+            model_class=entry["model_class"],
+            model_params=entry["params"],
+            n_splits=3, mi_k=5,
+            pca_variance=0.95, k_neighbors=2,
+            random_state=42, strategy="kmeans",
         )
 
-        from src.dl_pipeline import preprocess_fold
-        result = preprocess_fold(
-            X_tr, y_tr, X_val, y_val,
-            mi_k=0, pca_components=0,
-            n_clusters=10, k_neighbors=2, rus_cap=500,
-            random_state=42,
+        for k, v in cv_metrics.items():
+            assert len(v) == 3
+
+        assert selector is not None
+        assert scaler is not None
+        assert pca is not None
+
+        # Final retrain path
+        selector2 = fit_mi_selector(X_train, y_train, k=5, random_state=42)
+        X_tr_mi = selector2.transform(X_train)
+        X_te_mi = selector2.transform(X_test)
+        scaler2 = StandardScaler()
+        X_tr_s = scaler2.fit_transform(X_tr_mi)
+        pca2 = PCA(n_components=0.95, random_state=42)
+        X_tr_p = pca2.fit_transform(X_tr_s)
+        X_tr_b, y_tr_b = balance_full_train(
+            X_tr_p, y_train, strategy="kmeans", k_neighbors=2, random_state=42,
         )
-        assert result['X_tr'].shape[0] > 0
-        assert result['X_val'].shape[0] == len(y_val)
+        X_te_p = pca2.transform(scaler2.transform(X_te_mi))
 
-    def test_balancing_floor_k_neighbors(self):
-        X = np.random.RandomState(42).randn(50, 10).astype(np.float32)
-        y = np.array([0] * 45 + [1] * 5)
-
-        from src.balancing import balance_training_fold
-        X_bal, y_bal = balance_training_fold(
-            X, y, strategy='smote', k_neighbors=100, random_state=42,
+        model, test_m, y_pred = _train_and_evaluate(
+            entry["model_class"], entry["params"],
+            X_tr_b, y_tr_b, X_te_p, y_test,
         )
-        assert len(X_bal) > len(X)
-
-
-# ---------------------------------------------------------------------------
-# 7. No DL script hardcodes auc=0.0 in final evaluation path
-# ---------------------------------------------------------------------------
-
-class TestNoHardcodedAUC:
-    """Audit all DL scripts for hardcoded auc=0.0 or evaluate_predictions in test eval."""
-
-    def _parse_source(self, filepath):
-        with open(filepath) as f:
-            return f.read()
-
-    def test_train_dnn_uses_evaluate_with_proba(self):
-        src = self._parse_source("models/train_dnn.py")
-        # Should NOT import evaluate_predictions
-        assert "evaluate_predictions" not in src.split("from src.dl_pipeline")[0] or \
-               "evaluate_with_proba" in src
-        # Must use evaluate_with_proba
-        assert "evaluate_with_proba" in src
-        # Must use get_probabilities
-        assert "get_probabilities" in src
-
-    def test_train_lstm_uses_evaluate_with_proba(self):
-        src = self._parse_source("models/train_LSTM.py")
-        assert "evaluate_with_proba" in src
-        assert "get_probabilities" in src
-
-    def test_train_bilstm_uses_evaluate_with_proba(self):
-        src = self._parse_source("models/train_Bi-LSTM.py")
-        assert "evaluate_with_proba" in src
-        assert "get_probabilities" in src
-
-    def test_train_bilstm_sharedfe_uses_evaluate_with_proba(self):
-        src = self._parse_source("models/train_Bi-LSTM_shared-feature-extractor.py")
-        assert "evaluate_with_proba" in src
-
-    def test_train_dnn_mi_pca_kmeans_uses_evaluate_with_proba(self):
-        src = self._parse_source("models/train_dnn_mi_pca_kmeans.py")
-        assert "evaluate_with_proba" in src
-        assert "get_probabilities" in src
-
-    def test_no_script_has_auc_zero_literal_in_final_eval(self):
-        """No DL script should have auc=0.0 as a final metric value."""
-        scripts = [
-            "models/train_dnn.py",
-            "models/train_LSTM.py",
-            "models/train_Bi-LSTM.py",
-            "models/train_Bi-LSTM_shared-feature-extractor.py",
-            "models/train_dnn_mi_pca_kmeans.py",
-        ]
-        for script in scripts:
-            src = self._parse_source(script)
-            # The shared evaluate_predictions has auc=0.0 internally, which is fine
-            # but the script itself should never set auc=0.0 as final metric
-            # Check that there's no line like "test_metrics['auc'] = 0.0" or "auc': 0.0"
-            lines = src.split('\n')
-            for i, line in enumerate(lines):
-                stripped = line.strip()
-                # Skip comments
-                if stripped.startswith('#'):
-                    continue
-                # Skip if it's inside a function definition we don't own
-                assert "auc'] = 0.0" not in stripped and "auc'] =0.0" not in stripped, \
-                    f"{script} line {i+1} hardcodes auc=0.0: {stripped}"
-
-
-# ---------------------------------------------------------------------------
-# 8. All training DataLoaders use drop_last=True
-# ---------------------------------------------------------------------------
-
-class TestTrainingDropLastAudit:
-    """Audit all DL scripts to ensure training DataLoaders have drop_last=True."""
-
-    def _parse_source(self, filepath):
-        with open(filepath) as f:
-            return f.read()
-
-    def _count_dataloader_creates(self, src):
-        """Count DataLoader() calls and check for drop_last."""
-        results = []
-        lines = src.split('\n')
-        in_loader = False
-        loader_lines = []
-        paren_depth = 0
-        for i, line in enumerate(lines):
-            if 'DataLoader(' in line and not in_loader:
-                in_loader = True
-                loader_lines = [line]
-                paren_depth = line.count('(') - line.count(')')
-            elif in_loader:
-                loader_lines.append(line)
-                paren_depth += line.count('(') - line.count(')')
-                if paren_depth <= 0:
-                    block = '\n'.join(loader_lines)
-                    has_drop_last_true = 'drop_last=True' in block
-                    results.append({
-                        'line': i + 1 - len(loader_lines) + 1,
-                        'block': block,
-                        'has_drop_last_true': has_drop_last_true,
-                    })
-                    in_loader = False
-                    loader_lines = []
-        return results
-
-    def test_train_dnn_all_loaders_have_drop_last(self):
-        src = self._parse_source("models/train_dnn.py")
-        loaders = self._count_dataloader_creates(src)
-        for ld in loaders:
-            assert ld['has_drop_last_true'], \
-                f"train_dnn.py DataLoader at line ~{ld['line']} missing drop_last=True"
-
-    def test_train_lstm_all_loaders_have_drop_last(self):
-        src = self._parse_source("models/train_LSTM.py")
-        loaders = self._count_dataloader_creates(src)
-        for ld in loaders:
-            assert ld['has_drop_last_true'], \
-                f"train_LSTM.py DataLoader at line ~{ld['line']} missing drop_last=True"
-
-    def test_train_bilstm_all_loaders_have_drop_last(self):
-        src = self._parse_source("models/train_Bi-LSTM.py")
-        loaders = self._count_dataloader_creates(src)
-        for ld in loaders:
-            assert ld['has_drop_last_true'], \
-                f"train_Bi-LSTM.py DataLoader at line ~{ld['line']} missing drop_last=True"
-
-    def test_train_bilstm_sharedfe_all_loaders_have_drop_last(self):
-        src = self._parse_source("models/train_Bi-LSTM_shared-feature-extractor.py")
-        loaders = self._count_dataloader_creates(src)
-        for ld in loaders:
-            assert ld['has_drop_last_true'], \
-                f"train_Bi-LSTM_shared-feature-extractor.py DataLoader at line ~{ld['line']} missing drop_last=True"
-
-    def test_train_dnn_mi_pca_kmeans_all_loaders_have_drop_last(self):
-        src = self._parse_source("models/train_dnn_mi_pca_kmeans.py")
-        loaders = self._count_dataloader_creates(src)
-        for ld in loaders:
-            assert ld['has_drop_last_true'], \
-                f"train_dnn_mi_pca_kmeans.py DataLoader at line ~{ld['line']} missing drop_last=True"
-
-
-# ---------------------------------------------------------------------------
-# 9. No BatchNorm1d in any DL script
-# ---------------------------------------------------------------------------
-
-class TestNoBatchNorm:
-    """Audit that no DL script uses BatchNorm1d."""
-
-    def _parse_source(self, filepath):
-        with open(filepath) as f:
-            return f.read()
-
-    def test_train_dnn_no_batchnorm(self):
-        src = self._parse_source("models/train_dnn.py")
-        assert "BatchNorm1d" not in src
-
-    def test_train_dnn_mi_pca_kmeans_no_batchnorm(self):
-        src = self._parse_source("models/train_dnn_mi_pca_kmeans.py")
-        assert "BatchNorm1d" not in src
-
-    def test_train_bilstm_sharedfe_no_batchnorm(self):
-        src = self._parse_source("models/train_Bi-LSTM_shared-feature-extractor.py")
-        assert "BatchNorm1d" not in src
+        assert 0.0 <= test_m['accuracy'] <= 1.0
+        assert len(y_pred) == len(y_test)

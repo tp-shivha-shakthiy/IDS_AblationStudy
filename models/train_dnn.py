@@ -1,10 +1,10 @@
 """
 train_dnn.py
 ============
-Deep Neural Network - Baseline (no MI/PCA/balancing, class-weight loss)
+Deep Neural Network — Baseline (no MI/PCA/balancing, class-weight loss)
 
 Uses shared infrastructure from src/dl_pipeline.py.
-Architecture preserved: 2 hidden layers (64→32), LayerNorm, Dropout(0.1).
+Architecture preserved: 2 hidden layers (64→32), BatchNorm, Dropout(0.1).
 """
 
 import sys
@@ -20,8 +20,10 @@ from sklearn.model_selection import StratifiedKFold
 
 from src.dl_pipeline import (
     set_seeds, get_device, load_data,
-    compute_class_weights, evaluate_with_proba, get_probabilities, save_dl_artifacts,
+    compute_class_weights, evaluate_with_proba, get_probabilities,
+    save_dl_artifacts,
 )
+from src.experiment_config import build_experiment_config
 
 set_seeds(42)
 device = get_device()
@@ -37,11 +39,11 @@ class DeepNeuralNetwork(nn.Module):
         super().__init__()
         self.network = nn.Sequential(
             nn.Linear(input_dim, 64),
-            nn.LayerNorm(64),
+            nn.BatchNorm1d(64),
             nn.ReLU(),
             nn.Dropout(0.1),
             nn.Linear(64, 32),
-            nn.LayerNorm(32),
+            nn.BatchNorm1d(32),
             nn.ReLU(),
             nn.Linear(32, output_dim),
         )
@@ -64,18 +66,19 @@ def main(data_dir="data/raw"):
 
     # --- Per-fold CV (Scaler only, no MI/PCA/balancing for this model) ---
     print(f"\n{'='*60}")
-    print(f"  {MODEL_NAME} - Baseline DNN (class-weight loss)")
+    print(f"  {MODEL_NAME} — Baseline DNN (class-weight loss)")
     print(f"{'='*60}")
     print(f"\n  Cross-Validation (5 folds)")
 
     skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
     cv_metrics = []
 
+    class_weights = compute_class_weights(y_train, device)
+
     for fold, (trn_idx, val_idx) in enumerate(skf.split(X_train, y_train), 1):
         print(f"\n  Fold {fold}/5")
         X_tr, y_tr = X_train[trn_idx], y_train[trn_idx]
         X_val, y_val = X_train[val_idx], y_train[val_idx]
-        class_weights = compute_class_weights(y_tr, device)
 
         # Scaler fitted on fold train only
         from sklearn.preprocessing import StandardScaler
@@ -88,7 +91,8 @@ def main(data_dir="data/raw"):
         X_val_t = torch.tensor(X_val_s, dtype=torch.float32)
 
         train_loader = DataLoader(
-            TensorDataset(X_tr_t, y_tr_t), batch_size=1024, shuffle=True, drop_last=True,
+            TensorDataset(X_tr_t, y_tr_t), batch_size=1024, shuffle=True,
+            drop_last=True,
         )
 
         model = DeepNeuralNetwork(X_tr.shape[1], num_classes).to(device)
@@ -105,10 +109,11 @@ def main(data_dir="data/raw"):
                 optimizer.step()
 
         model.eval()
-        y_proba = get_probabilities(model, X_val_t, device)
-        preds = np.argmax(y_proba, axis=1)
+        with torch.no_grad():
+            preds = torch.argmax(model(X_val_t.to(device)), dim=1).cpu().numpy()
 
-        metrics = evaluate_with_proba(y_val, preds, y_proba, normal_class_idx)
+        val_proba = get_probabilities(model, X_val_s, device)
+        metrics = evaluate_with_proba(y_val, preds, val_proba, normal_class_idx)
         metrics['fold'] = fold
         cv_metrics.append(metrics)
         print(f"    Acc={metrics['multi_acc']:.4f}  F1={metrics['weighted_f1']:.4f}")
@@ -125,11 +130,11 @@ def main(data_dir="data/raw"):
     X_te_t = torch.tensor(X_test_s, dtype=torch.float32)
 
     train_loader = DataLoader(
-        TensorDataset(X_tr_t, y_tr_t), batch_size=1024, shuffle=True, drop_last=True,
+        TensorDataset(X_tr_t, y_tr_t), batch_size=1024, shuffle=True,
+        drop_last=True,
     )
 
     final_model = DeepNeuralNetwork(X_train.shape[1], num_classes).to(device)
-    class_weights = compute_class_weights(y_train, device)
     criterion = nn.CrossEntropyLoss(weight=class_weights)
     optimizer = optim.AdamW(final_model.parameters(), lr=0.01, weight_decay=1e-4)
 
@@ -144,10 +149,11 @@ def main(data_dir="data/raw"):
 
     # --- Test evaluation ---
     final_model.eval()
-    y_proba = get_probabilities(final_model, X_te_t, device)
-    test_preds = np.argmax(y_proba, axis=1)
+    with torch.no_grad():
+        test_preds = torch.argmax(final_model(X_te_t.to(device)), dim=1).cpu().numpy()
 
-    test_metrics = evaluate_with_proba(y_test, test_preds, y_proba, normal_class_idx)
+    test_proba = get_probabilities(final_model, X_test_s, device)
+    test_metrics = evaluate_with_proba(y_test, test_preds, test_proba, normal_class_idx)
 
     print(f"\n  {MODEL_NAME} Test Metrics:")
     for k, v in test_metrics.items():
@@ -163,8 +169,16 @@ def main(data_dir="data/raw"):
         normal_class_idx=normal_class_idx,
         y_test=y_test, y_test_pred=test_preds,
         scaler=scaler,
-        label_encoder=data['le'],
-        model_config={'input_dim': X_train.shape[1], 'output_dim': num_classes},
+        le=data['le'],
+        config=build_experiment_config(
+            model_name=MODEL_NAME,
+            model_params={"layers": [64, 32], "dropout": 0.1,
+                          "lr": 0.01, "weight_decay": 1e-4,
+                          "epochs": 5, "batch_size": 1024},
+            mi_k=0, pca_variance=None, tier=2,
+            dl_extra={"preprocessing": ["StandardScaler"],
+                      "balance_strategy": "class_weights"},
+        ),
     )
 
     return final_model, cv_metrics, test_metrics

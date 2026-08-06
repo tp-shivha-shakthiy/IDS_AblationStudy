@@ -22,24 +22,28 @@ import sys
 import json
 import gc
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
 import joblib
 from collections import Counter
 
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.decomposition import PCA
+from sklearn.feature_selection import SelectKBest
 from sklearn.model_selection import train_test_split, StratifiedKFold
 from sklearn.metrics import (accuracy_score, f1_score, precision_score,
                              recall_score, roc_auc_score, confusion_matrix,
                              ConfusionMatrixDisplay)
+from sklearn.cluster import MiniBatchKMeans
 from imblearn.over_sampling import SMOTE, KMeansSMOTE
 from imblearn.under_sampling import RandomUnderSampler
-from sklearn.cluster import MiniBatchKMeans
+
+from src.feature_selection import fit_mi_selector
 
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-
-from src.feature_pipeline import PreprocessingConfig, fit_transform_fold, fit_transform_full
 
 
 # ---------------------------------------------------------------------------
@@ -56,61 +60,11 @@ def set_seeds(seed: int = 42):
         torch.backends.cudnn.benchmark = False
 
 
-def get_device(requested: str = "auto"):
-    """Return a verified Torch device, falling back to CPU for CUDA failures."""
-    if requested not in {"auto", "cpu", "cuda"}:
-        raise ValueError("device must be 'auto', 'cpu', or 'cuda'")
-    if requested == "cpu":
-        device = torch.device('cpu')
-    elif not torch.cuda.is_available():
-        if requested == "cuda":
-            raise RuntimeError("CUDA was requested but is not available to PyTorch.")
-        device = torch.device('cpu')
-    else:
-        try:
-            # Trigger the CUDA allocator before an expensive training run. This
-            # catches common driver/NVML allocator failures and permits a safe
-            # CPU fallback when device selection is automatic.
-            probe = torch.empty(1, device='cuda')
-            del probe
-            torch.cuda.synchronize()
-            device = torch.device('cuda')
-        except RuntimeError as exc:
-            if requested == "cuda":
-                raise RuntimeError(
-                    "CUDA initialization failed. Update the NVIDIA driver / "
-                    "PyTorch CUDA build, or rerun with --device cpu."
-                ) from exc
-            print(f"CUDA health check failed ({exc}); falling back to CPU.")
-            device = torch.device('cpu')
+def get_device():
+    """Return the best available torch device."""
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Device: {device}")
     return device
-
-
-def _balance_dl_training(
-    X_train: np.ndarray,
-    y_train: np.ndarray,
-    n_clusters: int = 20,
-    k_neighbors: int = 2,
-    rus_cap: int = 15000,
-    random_state: int = 42,
-):
-    """Apply the DL balancing policy on training data only."""
-    class_counts = Counter(y_train)
-    under_strategy = {c: min(cnt, rus_cap) for c, cnt in class_counts.items()}
-    rus = RandomUnderSampler(sampling_strategy=under_strategy, random_state=random_state)
-    X_train_rus, y_train_rus = rus.fit_resample(X_train, y_train)
-
-    actual_k = min(k_neighbors, min(Counter(y_train_rus).values()) - 1)
-    kms = KMeansSMOTE(
-        cluster_balance_threshold=0.0,
-        k_neighbors=max(actual_k, 1),
-        kmeans_estimator=MiniBatchKMeans(n_init='auto', random_state=random_state),
-        random_state=random_state, n_jobs=1,
-    )
-    X_train_bal, y_train_bal = kms.fit_resample(X_train_rus, y_train_rus)
-    del X_train_rus, y_train_rus, rus, kms; gc.collect()
-    return X_train_bal, y_train_bal
 
 
 # ---------------------------------------------------------------------------
@@ -184,38 +138,47 @@ def preprocess_fold(
         y_val                   (unchanged)
         selector, scaler, pca   (fitted transformers, may be None)
     """
-    config = PreprocessingConfig(
-        use_mi=use_mi,
-        use_pca=use_pca,
-        mi_k=mi_k,
-        pca_n_components=pca_components if use_pca else None,
-        random_state=random_state,
-    )
+    selector, scaler, pca = None, None, None
 
+    # 1. MI Feature Selection (fit on fold train only)
+    if use_mi and mi_k > 0:
+        selector = fit_mi_selector(X_tr, y_tr, k=mi_k, random_state=random_state)
+        X_tr = selector.transform(X_tr)
+        X_val = selector.transform(X_val)
+
+    # 2. StandardScaler (fit on fold train only)
+    scaler = StandardScaler()
+    X_tr = scaler.fit_transform(X_tr)
+    X_val = scaler.transform(X_val)
+
+    # 3. PCA (fit on fold train only)
+    if use_pca and pca_components > 0:
+        n_comp = min(pca_components, X_tr.shape[1], X_tr.shape[0])
+        pca = PCA(n_components=n_comp, random_state=random_state)
+        X_tr = pca.fit_transform(X_tr)
+        X_val = pca.transform(X_val)
+
+    # 4. Balancing (fold train only, never touch val)
     if use_balancing:
-        result = fit_transform_fold(
-            X_tr, y_tr, X_val, y_val,
-            config=config,
-            balance_fn=_balance_dl_training,
-            balance_kwargs=dict(
-                n_clusters=n_clusters,
-                k_neighbors=k_neighbors,
-                rus_cap=rus_cap,
-                random_state=random_state,
-            ),
+        class_counts = Counter(y_tr)
+        under_strategy = {c: min(cnt, rus_cap) for c, cnt in class_counts.items()}
+        rus = RandomUnderSampler(sampling_strategy=under_strategy, random_state=random_state)
+        X_tr_rus, y_tr_rus = rus.fit_resample(X_tr, y_tr)
+
+        actual_k = min(k_neighbors, min(Counter(y_tr_rus).values()) - 1)
+        kms = KMeansSMOTE(
+            cluster_balance_threshold=0.0,
+            k_neighbors=max(actual_k, 1),
+            kmeans_estimator=MiniBatchKMeans(n_init='auto', random_state=random_state),
+            random_state=random_state, n_jobs=1,
         )
-    else:
-        result = fit_transform_fold(
-            X_tr, y_tr, X_val, y_val,
-            config=config,
-            balance_fn=None,
-            balance_kwargs=None,
-        )
+        X_tr, y_tr = kms.fit_resample(X_tr_rus, y_tr_rus)
+        del X_tr_rus, y_tr_rus, rus, kms; gc.collect()
 
     return {
-        'X_tr': result['X_train'], 'y_tr': result['y_train'],
-        'X_val': result['X_val'], 'y_val': result['y_val'],
-        'selector': result['selector'], 'scaler': result['scaler'], 'pca': result['pca'],
+        'X_tr': X_tr, 'y_tr': y_tr,
+        'X_val': X_val, 'y_val': y_val,
+        'selector': selector, 'scaler': scaler, 'pca': pca,
     }
 
 
@@ -250,40 +213,49 @@ def preprocess_final(
         y_test                        (unchanged)
         selector, scaler, pca         (fitted transformers)
     """
-    config = PreprocessingConfig(
-        use_mi=use_mi,
-        use_pca=use_pca,
-        mi_k=mi_k,
-        pca_n_components=pca_components if use_pca else None,
-        random_state=random_state,
-    )
+    selector, scaler, pca = None, None, None
 
+    # 1. MI (fit on full training only)
+    if use_mi and mi_k > 0:
+        selector = fit_mi_selector(X_train, y_train, k=mi_k, random_state=random_state)
+        X_train = selector.transform(X_train)
+        X_test = selector.transform(X_test)
+
+    # 2. Scaler (fit on full training only)
+    scaler = StandardScaler()
+    X_train = scaler.fit_transform(X_train)
+    X_test = scaler.transform(X_test)
+
+    # 3. PCA (fit on full training only)
+    if use_pca and pca_components > 0:
+        n_comp = min(pca_components, X_train.shape[1], X_train.shape[0])
+        pca = PCA(n_components=n_comp, random_state=random_state)
+        X_train = pca.fit_transform(X_train)
+        X_test = pca.transform(X_test)
+
+    # 4. Balancing (full training only, never touch test)
     if use_balancing:
-        result = fit_transform_full(
-            X_train, y_train, X_test, y_test,
-            config=config,
-            balance_fn=_balance_dl_training,
-            balance_kwargs=dict(
-                n_clusters=n_clusters,
-                k_neighbors=k_neighbors,
-                rus_cap=rus_cap,
-                random_state=random_state,
-            ),
-        )
-    else:
-        result = fit_transform_full(
-            X_train, y_train, X_test, y_test,
-            config=config,
-            balance_fn=None,
-            balance_kwargs=None,
-        )
+        class_counts = Counter(y_train)
+        under_strategy = {c: min(cnt, rus_cap) for c, cnt in class_counts.items()}
+        rus = RandomUnderSampler(sampling_strategy=under_strategy, random_state=random_state)
+        X_tr_rus, y_tr_rus = rus.fit_resample(X_train, y_train)
 
-    print(f"  Final train: {result['X_train'].shape} | Test: {result['X_test'].shape}")
+        actual_k = min(k_neighbors, min(Counter(y_tr_rus).values()) - 1)
+        kms = KMeansSMOTE(
+            cluster_balance_threshold=0.0,
+            k_neighbors=max(actual_k, 1),
+            kmeans_estimator=MiniBatchKMeans(n_init='auto', random_state=random_state),
+            random_state=random_state, n_jobs=1,
+        )
+        X_train, y_train = kms.fit_resample(X_tr_rus, y_tr_rus)
+        del X_tr_rus, y_tr_rus, rus, kms; gc.collect()
+
+    print(f"  Final train: {X_train.shape} | Test: {X_test.shape}")
 
     return {
-        'X_train': result['X_train'], 'y_train': result['y_train'],
-        'X_test': result['X_test'], 'y_test': result['y_test'],
-        'selector': result['selector'], 'scaler': result['scaler'], 'pca': result['pca'],
+        'X_train': X_train, 'y_train': y_train,
+        'X_test': X_test, 'y_test': y_test,
+        'selector': selector, 'scaler': scaler, 'pca': pca,
     }
 
 
@@ -351,46 +323,35 @@ def evaluate_with_proba(
     """Compute metrics including AUC when probabilities are available."""
     metrics = evaluate_predictions(y_true, y_pred, normal_class_idx)
     try:
-        classes = np.unique(y_true)
-        if len(classes) == 2 and y_proba.shape[1] == 2:
-            y_bin = (y_true != normal_class_idx).astype(int)
-            p_attack = y_proba[:, 1] if normal_class_idx == 0 else y_proba[:, 0]
-            metrics['auc'] = roc_auc_score(y_bin, p_attack)
-        else:
-            from sklearn.preprocessing import label_binarize
-            n_classes = y_proba.shape[1]
-            y_bin = label_binarize(y_true, classes=list(range(n_classes)))
-            metrics['auc'] = roc_auc_score(y_bin, y_proba, multi_class='ovr', average='weighted')
+        from sklearn.preprocessing import label_binarize
+        classes = np.unique(np.concatenate([y_true, np.arange(y_proba.shape[1])]))
+        y_bin = label_binarize(y_true, classes=list(range(y_proba.shape[1])))
+        metrics['auc'] = roc_auc_score(y_bin, y_proba, multi_class='ovr', average='weighted')
     except Exception:
         metrics['auc'] = 0.0
     return metrics
 
 
-def get_probabilities(model, X_tensor, device, batch_size: int = 4096):
-    """Run memory-bounded inference and return class probabilities.
-
-    Validation and test partitions in UNSW-NB15 contain hundreds of thousands
-    of rows.  Moving them to CUDA in one LSTM call can exhaust the caching
-    allocator, even when training itself uses small DataLoader batches.
+def get_probabilities(model: nn.Module, X: np.ndarray, device: torch.device) -> np.ndarray:
     """
-    if batch_size < 1:
-        raise ValueError("batch_size must be at least 1")
+    Run a forward pass and return softmax probabilities as a numpy array.
 
+    Parameters
+    ----------
+    model   : trained nn.Module whose forward() returns raw logits
+    X       : array (N, F) — will be converted to a float32 tensor
+    device  : torch device
+
+    Returns
+    -------
+    np.ndarray (N, num_classes)  row-normalised probabilities
+    """
     model.eval()
-    probabilities = []
+    X_t = torch.tensor(X, dtype=torch.float32).to(device)
     with torch.no_grad():
-        for start in range(0, len(X_tensor), batch_size):
-            batch = X_tensor[start:start + batch_size].to(device)
-            logits = model(batch)
-            # Multi-task models return (binary_logits, multiclass_logits).
-            # Metrics in this helper use the multiclass prediction head.
-            if isinstance(logits, tuple):
-                logits = logits[-1]
-            probabilities.append(torch.softmax(logits, dim=1).cpu())
-
-    if not probabilities:
-        return np.empty((0, 0), dtype=np.float32)
-    return torch.cat(probabilities, dim=0).numpy()
+        logits = model(X_t)
+        probs = torch.softmax(logits, dim=1).cpu().numpy()
+    return probs
 
 
 # ---------------------------------------------------------------------------
@@ -410,14 +371,30 @@ def save_dl_artifacts(
     selector=None,
     scaler=None,
     pca=None,
-    label_encoder=None,
-    model_config: dict = None,
+    le=None,
+    config: dict = None,
 ):
     """
-    Save model weights, metrics, preprocessing, and architecture metadata.
-    """
-    import pandas as pd
+    Save model weights, metrics CSV, metrics JSON, confusion matrix,
+    preprocessing artifacts (MI, Scaler, PCA, LabelEncoder), and config.json.
 
+    Parameters
+    ----------
+    model            : trained nn.Module
+    model_name       : str  (used for file naming)
+    cv_metrics       : list of per-fold metric dicts
+    test_metrics     : dict  (final test metrics)
+    save_dir         : str   (defaults to models/artifacts/<model_name>)
+    class_names      : list  (for confusion matrix labels)
+    normal_class_idx : int
+    y_test           : ground-truth labels  (for confusion matrix)
+    y_test_pred      : predicted labels     (for confusion matrix)
+    selector         : fitted SelectKBest   (MI feature selector)
+    scaler           : fitted StandardScaler
+    pca              : fitted PCA
+    le               : fitted LabelEncoder
+    config           : dict of all experiment hyper-parameters
+    """
     if save_dir is None:
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         save_dir = os.path.join(project_root, "models", "artifacts", model_name)
@@ -426,37 +403,20 @@ def save_dl_artifacts(
     # Model weights
     model_path = os.path.join(save_dir, f"{model_name.lower()}_model.pt")
     torch.save(model.state_dict(), model_path)
-    metadata = {
-        'model_name': model_name,
-        'class_names': class_names,
-        'normal_class_idx': normal_class_idx,
-        'model_config': model_config or {},
-    }
-    metadata_path = os.path.join(save_dir, f"{model_name.lower()}_metadata.json")
-    with open(metadata_path, 'w') as f:
-        json.dump(metadata, f, indent=2)
-    for artifact, filename in (
-        (selector, 'mi_selector.joblib'),
-        (scaler, 'scaler.joblib'),
-        (pca, 'pca.joblib'),
-        (label_encoder, 'label_encoder.joblib'),
-    ):
-        if artifact is not None:
-            joblib.dump(artifact, os.path.join(save_dir, filename))
-    print(f"  Model saved -> {model_path}")
+    print(f"  Model saved → {model_path}")
 
     # CV metrics CSV
     cv_df = pd.DataFrame(cv_metrics)
     cv_path = os.path.join(save_dir, f"{model_name.lower()}_cv_metrics.csv")
     cv_df.to_csv(cv_path, index=False, float_format='%.4f')
-    print(f"  CV metrics saved -> {cv_path}")
+    print(f"  CV metrics saved → {cv_path}")
 
     # Test metrics JSON
     if test_metrics:
         json_path = os.path.join(save_dir, f"{model_name.lower()}_test_metrics.json")
         with open(json_path, 'w') as f:
             json.dump(test_metrics, f, indent=2)
-        print(f"  Test metrics saved -> {json_path}")
+        print(f"  Test metrics saved → {json_path}")
 
     # Confusion matrix
     if y_test is not None and y_test_pred is not None and class_names is not None:
@@ -469,32 +429,28 @@ def save_dl_artifacts(
         plt.tight_layout()
         fig.savefig(os.path.join(save_dir, f"{model_name.lower()}_confusion_matrix.png"), dpi=150)
         plt.close(fig)
-        print(f"  Confusion matrix saved -> {save_dir}")
+        print(f"  Confusion matrix saved → {save_dir}")
 
-    # Preprocessing artifacts
+    # Preprocessing artifacts (for inference reproducibility)
+    if selector is not None:
+        joblib.dump(selector, os.path.join(save_dir, "mi_selector.joblib"))
+    if scaler is not None:
+        joblib.dump(scaler, os.path.join(save_dir, "scaler.joblib"))
+    if pca is not None:
+        joblib.dump(pca, os.path.join(save_dir, "pca.joblib"))
+    if le is not None:
+        joblib.dump(le, os.path.join(save_dir, "label_encoder.joblib"))
+
+    # Config JSON
+    if config is None:
+        config = {}
+    config.setdefault("model_name", model_name)
+    config.setdefault("class_names", class_names)
+    config.setdefault("normal_class_idx", normal_class_idx)
+    config.setdefault("num_classes", len(class_names) if class_names else None)
+    config_path = os.path.join(save_dir, "config.json")
+    with open(config_path, 'w') as f:
+        json.dump(config, f, indent=2)
+    print(f"  Config saved → {config_path}")
+
     return save_dir
-
-
-def load_dl_artifacts(model: nn.Module, model_name: str, save_dir: str, device=None) -> dict:
-    """Load weights and preprocessing for a caller-constructed DL model."""
-    if device is None:
-        device = torch.device('cpu')
-    stem = model_name.lower()
-    state = torch.load(os.path.join(save_dir, f"{stem}_model.pt"), map_location=device)
-    model.load_state_dict(state)
-    model.to(device).eval()
-
-    def optional_joblib(filename):
-        path = os.path.join(save_dir, filename)
-        return joblib.load(path) if os.path.exists(path) else None
-
-    with open(os.path.join(save_dir, f"{stem}_metadata.json")) as f:
-        metadata = json.load(f)
-    return {
-        'model': model,
-        'selector': optional_joblib('mi_selector.joblib'),
-        'scaler': optional_joblib('scaler.joblib'),
-        'pca': optional_joblib('pca.joblib'),
-        'label_encoder': optional_joblib('label_encoder.joblib'),
-        'metadata': metadata,
-    }

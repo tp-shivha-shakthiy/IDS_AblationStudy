@@ -27,6 +27,7 @@ from src.dl_pipeline import (
     preprocess_fold, preprocess_final,
     evaluate_with_proba, get_probabilities, save_dl_artifacts,
 )
+from src.experiment_config import build_experiment_config
 
 set_seeds(42)
 device = get_device()
@@ -71,7 +72,7 @@ def main(data_dir="data/raw"):
     class_names = data['class_names']
 
     print(f"\n{'='*60}")
-    print(f"  {MODEL_NAME} - Weighted BiLSTM + MI(30) + PCA(15) + KMeansSMOTE")
+    print(f"  {MODEL_NAME} — Weighted BiLSTM + MI(30) + PCA(15) + KMeansSMOTE")
     print(f"{'='*60}")
     print(f"\n  Cross-Validation (5 folds)")
 
@@ -103,7 +104,8 @@ def main(data_dir="data/raw"):
         X_val_t = torch.tensor(fold_data['X_val'], dtype=torch.float32)
 
         train_loader = DataLoader(
-            TensorDataset(X_tr_t, y_tr_t), batch_size=512, shuffle=True, drop_last=True,
+            TensorDataset(X_tr_t, y_tr_t), batch_size=512, shuffle=True,
+            drop_last=True,
         )
 
         model = WeightedBiLSTM(fold_data['X_tr'].shape[1], num_classes).to(device)
@@ -120,10 +122,11 @@ def main(data_dir="data/raw"):
                 optimizer.step()
 
         model.eval()
-        y_proba = get_probabilities(model, X_val_t, device)
-        preds = np.argmax(y_proba, axis=1)
+        with torch.no_grad():
+            preds = torch.argmax(model(X_val_t.to(device)), dim=1).cpu().numpy()
 
-        metrics = evaluate_with_proba(y_val, preds, y_proba, normal_class_idx)
+        val_proba = get_probabilities(model, fold_data['X_val'], device)
+        metrics = evaluate_with_proba(y_val, preds, val_proba, normal_class_idx)
         metrics['fold'] = fold
         cv_metrics.append(metrics)
         print(f"    Acc={metrics['multi_acc']:.4f}  F1={metrics['weighted_f1']:.4f}")
@@ -149,7 +152,8 @@ def main(data_dir="data/raw"):
     X_te_t = torch.tensor(final_data['X_test'], dtype=torch.float32)
 
     train_loader = DataLoader(
-        TensorDataset(X_tr_t, y_tr_t), batch_size=512, shuffle=True, drop_last=True,
+        TensorDataset(X_tr_t, y_tr_t), batch_size=512, shuffle=True,
+        drop_last=True,
     )
 
     final_model = WeightedBiLSTM(final_data['X_train'].shape[1], num_classes).to(device)
@@ -167,10 +171,11 @@ def main(data_dir="data/raw"):
 
     # --- Test evaluation ---
     final_model.eval()
-    y_proba = get_probabilities(final_model, X_te_t, device)
-    test_preds = np.argmax(y_proba, axis=1)
+    with torch.no_grad():
+        test_preds = torch.argmax(final_model(X_te_t.to(device)), dim=1).cpu().numpy()
 
-    test_metrics = evaluate_with_proba(y_test, test_preds, y_proba, normal_class_idx)
+    test_proba = get_probabilities(final_model, final_data['X_test'], device)
+    test_metrics = evaluate_with_proba(y_test, test_preds, test_proba, normal_class_idx)
 
     print(f"\n  {MODEL_NAME} Test Metrics:")
     for k, v in test_metrics.items():
@@ -184,9 +189,18 @@ def main(data_dir="data/raw"):
         class_names=class_names,
         normal_class_idx=normal_class_idx,
         y_test=y_test, y_test_pred=test_preds,
-        selector=final_data['selector'], scaler=final_data['scaler'],
-        pca=final_data['pca'], label_encoder=data['le'],
-        model_config={'input_dim': final_data['X_train'].shape[1], 'output_dim': num_classes, 'hidden_dim': 32},
+        selector=final_data['selector'],
+        scaler=final_data['scaler'],
+        pca=final_data['pca'],
+        le=data['le'],
+        config=build_experiment_config(
+            model_name=MODEL_NAME,
+            model_params={"hidden_dim": 32, "dropout": 0.0,
+                          "lr": 0.005, "epochs": 5, "batch_size": 512},
+            mi_k=30, pca_variance=None, tier=2,
+            dl_extra={"preprocessing": ["MI_k30", "StandardScaler", "PCA_15", "KMeansSMOTE"],
+                      "balance_strategy": "kmeans + class_weights"},
+        ),
     )
 
     return final_model, cv_metrics, test_metrics

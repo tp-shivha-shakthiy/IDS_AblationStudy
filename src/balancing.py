@@ -14,12 +14,14 @@ Provides two functions:
       Must NEVER receive validation or test data.
 
 Both support:
-  strategy="kmeans"  (default) — MiniBatchKMeans cluster pre-processing + SMOTE
+  strategy="kmeans"  (default) — KMeansSMOTE (imblearn) cluster-aware oversampling
   strategy="smote"              — regular SMOTE
 """
 
 import numpy as np
+from collections import Counter
 from imblearn.over_sampling import SMOTE, KMeansSMOTE
+from imblearn.under_sampling import RandomUnderSampler
 from sklearn.cluster import MiniBatchKMeans
 
 
@@ -34,6 +36,7 @@ def balance_training_fold(
     k_neighbors: int = 3,
     n_clusters: int = 20,
     random_state: int = 42,
+    rus_cap: int = 0,
 ) -> tuple:
     """
     Balance a single training fold.  Must receive ONLY training data.
@@ -46,38 +49,42 @@ def balance_training_fold(
     k_neighbors  : int   SMOTE neighbour count
     n_clusters   : int   K-means cluster count (ignored when strategy='smote')
     random_state : int
+    rus_cap      : int   if >0, cap each class to this many samples before
+                         oversampling (matches Tier 2 DL pipeline behaviour)
 
     Returns
     -------
     X_balanced, y_balanced
     """
-    from collections import Counter
-    minority_count = min(Counter(y_train).values())
-    if minority_count < 2:
-        raise ValueError(
-            "Balancing requires at least two samples in every class; "
-            "reduce n_splits or remove singleton classes first."
+    X_use, y_use = X_train, y_train
+
+    if rus_cap > 0:
+        class_counts = Counter(y_use)
+        under_strategy = {c: min(cnt, rus_cap) for c, cnt in class_counts.items()}
+        rus = RandomUnderSampler(
+            sampling_strategy=under_strategy, random_state=random_state,
         )
-    actual_k = min(k_neighbors, minority_count - 1)
+        X_use, y_use = rus.fit_resample(X_use, y_use)
+
     if strategy == "kmeans":
-        # KMeansSMOTE uses cluster membership to decide where to synthesize
-        # samples.  The previous implementation fitted KMeans and discarded
-        # its labels, making this option indistinguishable from plain SMOTE.
-        sm = KMeansSMOTE(
-            k_neighbors=max(actual_k, 1),
-            kmeans_estimator=MiniBatchKMeans(
-                n_clusters=min(n_clusters, len(X_train)), batch_size=2048,
-                random_state=random_state, n_init='auto',
-            ),
+        minority_count = min(Counter(y_use).values())
+        adj_k = min(k_neighbors, minority_count - 1)
+        adj_k = max(adj_k, 1)
+        kms = KMeansSMOTE(
             cluster_balance_threshold=0.0,
+            k_neighbors=adj_k,
+            kmeans_estimator=MiniBatchKMeans(n_init='auto', random_state=random_state),
             random_state=random_state,
             n_jobs=1,
         )
-    elif strategy == "smote":
-        sm = SMOTE(random_state=random_state, k_neighbors=max(actual_k, 1))
+        X_res, y_res = kms.fit_resample(X_use, y_use)
     else:
-        raise ValueError("strategy must be 'kmeans' or 'smote'")
-    X_res, y_res = sm.fit_resample(X_train, y_train)
+        minority_count = min(Counter(y_use).values())
+        adj_k = min(k_neighbors, minority_count - 1)
+        adj_k = max(adj_k, 1)
+        sm = SMOTE(random_state=random_state, k_neighbors=adj_k)
+        X_res, y_res = sm.fit_resample(X_use, y_use)
+
     return X_res, y_res
 
 
@@ -92,6 +99,7 @@ def balance_full_train(
     k_neighbors: int = 3,
     n_clusters: int = 20,
     random_state: int = 42,
+    rus_cap: int = 0,
 ) -> tuple:
     """
     Balance the full training set for final model retraining.
@@ -106,6 +114,7 @@ def balance_full_train(
     k_neighbors  : int   SMOTE neighbour count
     n_clusters   : int   K-means cluster count (ignored when strategy='smote')
     random_state : int
+    rus_cap      : int   if >0, cap each class before oversampling
 
     Returns
     -------
@@ -117,6 +126,7 @@ def balance_full_train(
         k_neighbors=k_neighbors,
         n_clusters=n_clusters,
         random_state=random_state,
+        rus_cap=rus_cap,
     )
     print(f"    Balanced training: {X_train.shape[0]:,} -> "
           f"{X_balanced.shape[0]:,} samples")
