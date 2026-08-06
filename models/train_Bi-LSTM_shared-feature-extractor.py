@@ -80,7 +80,7 @@ def main(data_dir="data/raw"):
     class_names = data['class_names']
 
     print(f"\n{'='*60}")
-    print(f"  {MODEL_NAME} — Multi-Task Hierarchical DNN")
+    print(f"  {MODEL_NAME} - Multi-Task Hierarchical DNN")
     print(f"{'='*60}")
     print(f"\n  Cross-Validation (5 folds)")
 

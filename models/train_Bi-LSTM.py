@@ -71,7 +71,7 @@ def main(data_dir="data/raw"):
     class_names = data['class_names']
 
     print(f"\n{'='*60}")
-    print(f"  {MODEL_NAME} — Weighted BiLSTM + MI(30) + PCA(15) + KMeansSMOTE")
+    print(f"  {MODEL_NAME} - Weighted BiLSTM + MI(30) + PCA(15) + KMeansSMOTE")
     print(f"{'='*60}")
     print(f"\n  Cross-Validation (5 folds)")
 

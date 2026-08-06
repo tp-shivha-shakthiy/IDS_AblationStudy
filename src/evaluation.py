@@ -114,7 +114,7 @@ def plot_roc_curve(
     try:
         y_score = model.predict_proba(X)
     except Exception:
-        print("  [plot_roc_curve] Model has no predict_proba — skipping.")
+        print("  [plot_roc_curve] Model has no predict_proba - skipping.")
         return
 
     # Compute per-class ROC
@@ -166,7 +166,7 @@ def plot_feature_importance(
     try:
         importances = model.feature_importances_
     except AttributeError:
-        print("  [feature_importance] Model has no feature_importances_ — skipping.")
+        print("  [feature_importance] Model has no feature_importances_ - skipping.")
         return
 
     labels = [f"PC{i+1}" for i in range(len(importances))]
@@ -224,7 +224,7 @@ def save_preprocessing_artifacts(
         path = os.path.join(save_dir, "label_encoder.joblib")
         joblib.dump(le, path)
 
-    print(f"  Preprocessing artifacts saved → {save_dir}/")
+    print(f"  Preprocessing artifacts saved -> {save_dir}/")
 
 
 # ---------------------------------------------------------------------------
@@ -287,6 +287,43 @@ def save_results(
             print(f"  Saved: {report_path}")
 
 
+def save_ablation_tables(
+    summary_rows: list,
+    cv_rows: list,
+    results_dir: str,
+    modes: list,
+) -> None:
+    """Persist raw/MI/PCA/MI+PCA comparison tables for paper-ready export."""
+    os.makedirs(results_dir, exist_ok=True)
+
+    summary_df = pd.DataFrame(summary_rows)
+    cv_df = pd.DataFrame(cv_rows)
+
+    test_summary_path = os.path.join(results_dir, 'preprocessing_ablation_test_metrics.csv')
+    summary_df.to_csv(test_summary_path, index=False, float_format='%.4f')
+    print(f"  Saved: {test_summary_path}")
+
+    cv_summary_path = os.path.join(results_dir, 'preprocessing_ablation_cv_metrics.csv')
+    cv_df.to_csv(cv_summary_path, index=False, float_format='%.4f')
+    print(f"  Saved: {cv_summary_path}")
+
+    metric_cols = [c for c in summary_df.columns if c not in {'Model', 'Preprocessing'}]
+    for metric in metric_cols:
+        pivot = summary_df.pivot(index='Model', columns='Preprocessing', values=metric)
+        pivot = pivot.reindex(index=['HGB', 'XGBoost', 'LogReg'], columns=modes)
+        metric_path = os.path.join(results_dir, f'preprocessing_ablation_{metric}.csv')
+        pivot.to_csv(metric_path, float_format='%.4f')
+        print(f"  Saved: {metric_path}")
+
+    cv_metric_cols = [c for c in cv_df.columns if c.startswith('cv_')]
+    for metric in cv_metric_cols:
+        pivot = cv_df.pivot(index='Model', columns='Preprocessing', values=metric)
+        pivot = pivot.reindex(index=['HGB', 'XGBoost', 'LogReg'], columns=modes)
+        metric_path = os.path.join(results_dir, f'preprocessing_ablation_{metric}.csv')
+        pivot.to_csv(metric_path, float_format='%.4f')
+        print(f"  Saved: {metric_path}")
+
+
 # ---------------------------------------------------------------------------
 # Console Summary
 # ---------------------------------------------------------------------------
@@ -295,7 +332,7 @@ def print_final_summary(all_test_results: list) -> None:
     """Print a formatted comparison table to stdout."""
     df = pd.concat(all_test_results, ignore_index=True)
     print("\n" + "=" * 72)
-    print("  FINAL MODEL COMPARISON — Blind 20 % Test Set")
+    print("  FINAL MODEL COMPARISON - Blind 20 % Test Set")
     print("=" * 72)
     float_cols = [c for c in df.columns if c != 'Model']
     fmt = {c: '{:.4f}'.format for c in float_cols}

@@ -34,6 +34,11 @@ def get_git_commit() -> str:
 def build_experiment_config(
     model_name: str,
     model_params: dict = None,
+    experiment_name: str = "mi_pca_balancing",
+    preprocessing_mode: str = "mi_pca",
+    use_mi: bool = True,
+    use_pca: bool = True,
+    use_balancing: bool = True,
     mi_k: int = 15,
     pca_variance: float = 0.95,
     n_splits: int = 5,
@@ -69,6 +74,11 @@ def build_experiment_config(
         "cv_folds": n_splits,
         "balancer": balancer,
         "balancer_k_neighbors": k_neighbors,
+        "experiment_name": experiment_name,
+        "preprocessing_mode": preprocessing_mode,
+        "use_mi": use_mi,
+        "use_pca": use_pca,
+        "use_balancing": use_balancing,
         "feature_selection": "mutual_information",
         "feature_selection_scope": "per_fold_training_data",
         "feature_selection_k": mi_k,
@@ -88,6 +98,18 @@ def build_experiment_config(
     return config
 
 
+def build_experiment_run_dir(
+    base_dir: str,
+    model_name: str,
+    preprocessing_mode: str,
+    timestamp: str = None,
+) -> str:
+    """Create a unique run directory under model/preprocessing mode."""
+    if timestamp is None:
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    return os.path.join(base_dir, model_name, preprocessing_mode, timestamp)
+
+
 def save_experiment_config(config: dict, save_dir: str) -> str:
     """
     Save experiment config to JSON file.
@@ -105,7 +127,7 @@ def save_experiment_config(config: dict, save_dir: str) -> str:
     path = os.path.join(save_dir, "experiment_config.json")
     with open(path, 'w') as f:
         json.dump(config, f, indent=2)
-    print(f"  Experiment config saved → {path}")
+    print(f"  Experiment config saved -> {path}")
     return path
 
 
@@ -137,7 +159,6 @@ HGB_PARAMS = dict(
 )
 
 LOGREG_PARAMS = dict(
-    multi_class='multinomial',
     solver='saga',
     max_iter=50,
     random_state=42,

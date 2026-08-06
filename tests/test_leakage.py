@@ -188,6 +188,80 @@ class TestCVPerFoldIndependence:
         assert pca is not None
         assert isinstance(pca, PCA)
 
+    @pytest.mark.parametrize(
+        "use_mi,use_pca,expected_selector,expected_pca",
+        [
+            (False, False, False, False),
+            (True, False, True, False),
+            (False, True, False, True),
+            (True, True, True, True),
+        ],
+    )
+    def test_run_cv_supports_all_preprocessing_modes(self, split_dataset,
+                                                       use_mi, use_pca,
+                                                       expected_selector,
+                                                       expected_pca):
+        """run_cv must support raw, MI-only, PCA-only, and MI+PCA."""
+        X_train, X_test, y_train, y_test = split_dataset
+
+        from sklearn.ensemble import HistGradientBoostingClassifier
+
+        cv_metrics, selector, scaler, pca = run_cv(
+            X_train, y_train,
+            model_class=HistGradientBoostingClassifier,
+            model_params=dict(max_iter=5, random_state=42),
+            n_splits=3, mi_k=10,
+            pca_variance=0.95, k_neighbors=2,
+            random_state=42, strategy="smote",
+            use_mi=use_mi, use_pca=use_pca,
+        )
+
+        for k, v in cv_metrics.items():
+            assert len(v) == 3
+        assert (selector is not None) == expected_selector
+        assert (pca is not None) == expected_pca
+        assert scaler is not None
+
+    @pytest.mark.parametrize(
+        "experiment_name,use_mi,use_pca,use_balancing,expected_selector,expected_pca",
+        [
+            ("raw", False, False, False, False, False),
+            ("mi", True, False, False, True, False),
+            ("mi_balancing", True, False, True, True, False),
+            ("pca", False, True, False, False, True),
+            ("pca_balancing", False, True, True, False, True),
+            ("mi_pca", True, True, False, True, True),
+            ("mi_pca_balancing", True, True, True, True, True),
+        ],
+    )
+    def test_run_cv_all_preprocessing_presets(self, split_dataset, experiment_name,
+                                              use_mi, use_pca, use_balancing,
+                                              expected_selector, expected_pca):
+        """Each official preprocessing preset must remain leakage-free."""
+        X_train, X_test, y_train, y_test = split_dataset
+
+        from sklearn.ensemble import HistGradientBoostingClassifier
+
+        with patch('src.cross_validation.balance_training_fold') as mock_bal:
+            mock_bal.side_effect = lambda X, y, **kwargs: (X, y)
+            cv_metrics, selector, scaler, pca = run_cv(
+                X_train, y_train,
+                model_class=HistGradientBoostingClassifier,
+                model_params=dict(max_iter=5, random_state=42),
+                n_splits=3, mi_k=10,
+                pca_variance=0.95, k_neighbors=2,
+                random_state=42, strategy="smote",
+                use_mi=use_mi, use_pca=use_pca,
+                use_balancing=use_balancing,
+            )
+
+            for k, v in cv_metrics.items():
+                assert len(v) == 3
+            assert (selector is not None) == expected_selector
+            assert (pca is not None) == expected_pca
+            assert scaler is not None
+            assert mock_bal.call_count == (3 if use_balancing else 0)
+
     def test_each_fold_mi_is_independent(self, synthetic_dataset):
         """Each fold produces a different MI selector fitted on different data."""
         X, y = synthetic_dataset
@@ -604,6 +678,108 @@ class TestDLPipelineNoLeakage:
         for key in ['binary_acc', 'binary_f1', 'multi_acc', 'macro_f1',
                      'weighted_f1', 'precision', 'recall', 'auc']:
             assert key in metrics, f"Missing metric: {key}"
+
+    @pytest.mark.parametrize(
+        "use_mi,use_pca,mi_k,pca_components,expected_selector,expected_pca,expected_dim",
+        [
+            (False, False, 0, 0, False, False, 20),
+            (True, False, 10, 0, True, False, 10),
+            (False, True, 0, 5, False, True, 5),
+            (True, True, 10, 5, True, True, 5),
+        ],
+    )
+    def test_preprocess_fold_all_modes(self, split_dataset, use_mi, use_pca,
+                                       mi_k, pca_components, expected_selector,
+                                       expected_pca, expected_dim):
+        """Every fold-level preprocessing mode must remain leakage-free."""
+        from src.dl_pipeline import preprocess_fold
+
+        X_train, X_test, y_train, y_test = split_dataset
+        X_tr, y_tr = X_train[:640], y_train[:640]
+        X_val, y_val = X_train[640:], y_train[640:]
+
+        result = preprocess_fold(
+            X_tr, y_tr, X_val, y_val,
+            mi_k=mi_k,
+            pca_components=pca_components,
+            use_mi=use_mi,
+            use_pca=use_pca,
+            use_balancing=False,
+        )
+
+        assert (result['selector'] is not None) == expected_selector
+        assert (result['pca'] is not None) == expected_pca
+        assert result['X_tr'].shape[0] == len(y_tr)
+        assert result['X_val'].shape[0] == len(y_val)
+        assert result['X_tr'].shape[1] == expected_dim
+        assert result['X_val'].shape[1] == expected_dim
+
+    @pytest.mark.parametrize(
+        "use_mi,use_pca,mi_k,pca_components,expected_selector,expected_pca,expected_dim",
+        [
+            (False, False, 0, 0, False, False, 20),
+            (True, False, 10, 0, True, False, 10),
+            (False, True, 0, 5, False, True, 5),
+            (True, True, 10, 5, True, True, 5),
+        ],
+    )
+    def test_preprocess_final_all_modes(self, split_dataset, use_mi, use_pca,
+                                        mi_k, pca_components, expected_selector,
+                                        expected_pca, expected_dim):
+        """Every final retrain preprocessing mode must remain leakage-free."""
+        from src.dl_pipeline import preprocess_final
+
+        X_train, X_test, y_train, y_test = split_dataset
+
+        result = preprocess_final(
+            X_train, y_train, X_test, y_test,
+            mi_k=mi_k,
+            pca_components=pca_components,
+            use_mi=use_mi,
+            use_pca=use_pca,
+            use_balancing=False,
+        )
+
+        assert (result['selector'] is not None) == expected_selector
+        assert (result['pca'] is not None) == expected_pca
+        assert result['X_train'].shape[0] == len(y_train)
+        assert result['X_test'].shape[0] == len(y_test)
+        assert result['X_train'].shape[1] == expected_dim
+        assert result['X_test'].shape[1] == expected_dim
+
+    @pytest.mark.parametrize(
+        "experiment_name,use_mi,use_pca,use_balancing,expected_selector,expected_pca",
+        [
+            ("raw", False, False, False, False, False),
+            ("mi", True, False, False, True, False),
+            ("mi_balancing", True, False, True, True, False),
+            ("pca", False, True, False, False, True),
+            ("pca_balancing", False, True, True, False, True),
+            ("mi_pca", True, True, False, True, True),
+            ("mi_pca_balancing", True, True, True, True, True),
+        ],
+    )
+    def test_preprocess_final_all_presets(self, split_dataset, experiment_name,
+                                          use_mi, use_pca, use_balancing,
+                                          expected_selector, expected_pca):
+        """Each official final-retrain preprocessing preset must remain leakage-free."""
+        from src.dl_pipeline import preprocess_final
+
+        X_train, X_test, y_train, y_test = split_dataset
+
+        result = preprocess_final(
+            X_train, y_train, X_test, y_test,
+            mi_k=10,
+            pca_components=5,
+            use_mi=use_mi,
+            use_pca=use_pca,
+            use_balancing=use_balancing,
+        )
+
+        assert (result['selector'] is not None) == expected_selector
+        assert (result['pca'] is not None) == expected_pca
+        assert result['X_test'].shape[0] == len(y_test)
+        assert result['X_train'].shape[0] >= len(y_train) if use_balancing else result['X_train'].shape[0] == len(y_train)
 
 
 # ---------------------------------------------------------------------------

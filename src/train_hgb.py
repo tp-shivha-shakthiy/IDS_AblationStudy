@@ -15,15 +15,14 @@ import os
 import json
 import warnings
 import joblib
+import pandas as pd
 from sklearn.ensemble import HistGradientBoostingClassifier
-from sklearn.preprocessing import StandardScaler
-from sklearn.decomposition import PCA
-from sklearn.feature_selection import mutual_info_classif, SelectKBest
 from sklearn.metrics import (precision_score, recall_score, f1_score,
                              accuracy_score, roc_auc_score)
 
 from src.cross_validation import run_cv
 from src.balancing import balance_full_train
+from src.feature_pipeline import PreprocessingConfig, fit_transform_full
 from src.evaluation import plot_confusion_matrix, plot_roc_curve
 
 
@@ -48,6 +47,7 @@ def _train_and_evaluate(X_tr, y_tr, X_val, y_val, random_state=42):
         'recall': recall_score(y_val, y_pred,
                                average='weighted', zero_division=0),
         'f1': f1_score(y_val, y_pred, average='weighted', zero_division=0),
+        'macro_f1': f1_score(y_val, y_pred, average='macro', zero_division=0),
     }
     try:
         metrics['auc'] = roc_auc_score(y_val, model.predict_proba(X_val),
@@ -71,6 +71,12 @@ def train_and_evaluate(
     balancer: str = "kmeans",
     make_plots: bool = True,
     normal_class_idx: int = 0,
+    use_mi: bool = True,
+    use_pca: bool = True,
+    use_balancing: bool = True,
+    experiment_name: str = None,
+    preprocessing_mode: str = None,
+    output_dir: str = None,
 ) -> dict:
     """
     Full HGB pipeline: CV → final retrain on full balanced train → test eval.
@@ -89,6 +95,17 @@ def train_and_evaluate(
         max_iter=30, learning_rate=0.05, max_depth=5,
         l2_regularization=1.0, random_state=random_state,
     )
+    preprocessing_config = PreprocessingConfig(
+        use_mi=use_mi,
+        use_pca=use_pca,
+        use_balancing=use_balancing,
+        mi_k=mi_k,
+        pca_n_components=pca_variance,
+        random_state=random_state,
+    )
+    run_name = experiment_name or preprocessing_mode or preprocessing_config.experiment_name
+    save_dir = output_dir or os.path.join("results", MODEL_NAME, run_name)
+    os.makedirs(save_dir, exist_ok=True)
 
     # --- Step 1: Per-fold CV (MI + Scaler + PCA + K-means SMOTE inside) ---
     print(f"\n  === Cross-Validation ({n_splits} folds) ===")
@@ -99,6 +116,9 @@ def train_and_evaluate(
         n_splits=n_splits,
         mi_k=mi_k,
         pca_variance=pca_variance,
+        use_mi=use_mi,
+        use_pca=use_pca,
+        use_balancing=use_balancing,
         k_neighbors=k_neighbors,
         random_state=random_state,
         strategy=balancer,
@@ -109,28 +129,37 @@ def train_and_evaluate(
     for k, v in cv_metrics.items():
         print(f"    {k:>10s}: {np.mean(v):.4f} (+/- {np.std(v):.4f})")
 
+    cv_metrics_path = os.path.join(save_dir, "cv_metrics.csv")
+    pd.DataFrame(cv_metrics).to_csv(cv_metrics_path, index=False, float_format='%.4f')
+    print(f"  CV metrics saved -> {cv_metrics_path}")
+
     # --- Step 2: Full train → MI → Scaler → PCA → K-means SMOTE → retrain ---
     print(f"\n  === Final Retrain on Full Training Set ===")
 
-    selector = SelectKBest(score_func=mutual_info_classif, k=mi_k)
-    selector.fit(X_train, y_train)
-    X_train_mi = selector.transform(X_train)
-    X_test_mi = selector.transform(X_test)
-    print(f"    MI selected: {X_train_mi.shape[1]} features")
-
-    scaler = StandardScaler()
-    X_train_s = scaler.fit_transform(X_train_mi)
-
-    pca = PCA(n_components=pca_variance, random_state=random_state)
-    X_train_p = pca.fit_transform(X_train_s)
-    print(f"    PCA components: {X_train_p.shape[1]}")
-
-    X_train_b, y_train_b = balance_full_train(
-        X_train_p, y_train, strategy=balancer,
-        k_neighbors=k_neighbors, random_state=random_state,
+    final_data = fit_transform_full(
+        X_train, y_train, X_test, y_test,
+        config=preprocessing_config,
+        balance_fn=balance_full_train if use_balancing else None,
+        balance_kwargs=dict(
+            strategy=balancer,
+            k_neighbors=k_neighbors,
+            random_state=random_state,
+        ) if use_balancing else None,
     )
 
-    X_test_p = pca.transform(scaler.transform(X_test_mi))
+    X_train_b = final_data['X_train']
+    y_train_b = final_data['y_train']
+    X_test_p = final_data['X_test']
+    selector = final_data['selector']
+    scaler = final_data['scaler']
+    pca = final_data['pca']
+
+    if selector is not None:
+        print(f"    MI selected: {X_train_b.shape[1] if pca is None else selector.k} features")
+    if pca is not None:
+        print(f"    PCA components: {X_train_b.shape[1]}")
+    if selector is None and pca is None:
+        print(f"    Raw features: {X_train_b.shape[1]}")
 
     model, test_metrics, y_test_pred = _train_and_evaluate(
         X_train_b, y_train_b, X_test_p, y_test, random_state=random_state,
@@ -145,29 +174,26 @@ def train_and_evaluate(
         print(f"    {k:>10s}: {v:.4f}")
 
     # --- Step 3: Save artifacts ---
-    save_dir = os.path.join("models", "artifacts", MODEL_NAME)
-    os.makedirs(save_dir, exist_ok=True)
-
-    model_path = os.path.join(save_dir, f"{MODEL_NAME.lower()}_model.joblib")
+    model_path = os.path.join(save_dir, f"model.joblib")
     joblib.dump(model, model_path)
-    print(f"\n  Model saved → {model_path}")
+    print(f"\n  Model saved -> {model_path}")
 
     test_metrics_path = os.path.join(save_dir, "test_metrics.json")
     with open(test_metrics_path, 'w') as f:
         json.dump(test_metrics, f, indent=2)
-    print(f"  Test metrics saved → {test_metrics_path}")
+    print(f"  Test metrics saved -> {test_metrics_path}")
 
     if make_plots:
         plot_confusion_matrix(
             y_test, y_test_pred, class_names,
             normal_class_idx=normal_class_idx, save_dir=save_dir,
-            prefix=f"{MODEL_NAME.lower()}_",
+            prefix="",
         )
         plot_roc_curve(
-            model, X_test_mi, y_test, class_names,
-            scaler=scaler, pca=pca,
+            model, X_test_p, y_test, class_names,
+            scaler=None, pca=None,
             title=f"{MODEL_NAME} ROC Curve (Test Set)",
-            save_dir=save_dir, prefix=f"{MODEL_NAME.lower()}_",
+            save_dir=save_dir, prefix="",
         )
 
     results = {
@@ -178,8 +204,10 @@ def train_and_evaluate(
         'selector': selector,
         'scaler': scaler,
         'pca': pca,
+        'preprocessing_mode': preprocessing_mode or preprocessing_config.mode_name,
+        'experiment_name': run_name,
+        'save_dir': save_dir,
     }
 
-    del X_train_mi, X_test_mi, X_train_s, X_train_p
     del X_train_b, y_train_b; gc.collect()
     return results

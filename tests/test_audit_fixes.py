@@ -23,6 +23,15 @@ def test_classical_trainers_expose_runtime_balancer_and_plot_options():
         assert 'normal_class_idx' in parameters
 
 
+def test_classical_trainers_expose_preprocessing_switches():
+    for trainer in (train_hgb, train_xgboost, train_logreg):
+        parameters = inspect.signature(trainer).parameters
+        assert 'use_mi' in parameters
+        assert 'use_pca' in parameters
+        assert 'use_balancing' in parameters
+        assert 'experiment_name' in parameters
+
+
 def test_kmeans_strategy_uses_actual_kmeans_smote_implementation():
     source = inspect.getsource(balance_training_fold)
     assert 'KMeansSMOTE(' in source
@@ -30,8 +39,14 @@ def test_kmeans_strategy_uses_actual_kmeans_smote_implementation():
 
 
 def test_final_dl_preprocessing_keeps_the_bounded_resampling_policy():
-    from src.dl_pipeline import preprocess_final
+    from src.dl_pipeline import preprocess_final, _balance_dl_training
 
-    source = inspect.getsource(preprocess_final)
+    # The bounded resampling policy (RUS cap + KMeansSMOTE) now lives in the
+    # shared helper; preprocess_final must delegate to it for the final retrain.
+    source = inspect.getsource(_balance_dl_training)
     assert 'RandomUnderSampler' in source
     assert 'rus_cap' in source
+
+    final_source = inspect.getsource(preprocess_final)
+    assert '_balance_dl_training' in final_source
+    assert 'balance_fn=' in final_source

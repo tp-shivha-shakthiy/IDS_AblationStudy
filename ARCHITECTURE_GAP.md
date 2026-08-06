@@ -209,3 +209,30 @@ All phases of the recommended refactoring have been implemented:
 | `src/train_logistic.py` | Added `json` import + `test_metrics.json` saving |
 | `ARCHITECTURE_GAP.md` | This file — updated to reflect resolved state |
 | `AUDIT.md` | Updated to reflect current codebase state |
+
+---
+
+## 8. Preprocessing Ablation Extension
+
+An incremental extension added a third preprocessing switch so that balancing can be
+independently toggled alongside MI and PCA:
+
+- `use_mi`
+- `use_pca`
+- `use_balancing`
+
+The seven official presets are predefined configurations over these switches
+(raw, mi, mi_balancing, pca, pca_balancing, mi_pca, mi_pca_balancing). No separate
+pipelines were introduced: the same leakage-free fit/transform helper
+(`src/feature_pipeline.py`) is reused by the classical CV loop, the classical final
+retrain, and the DL fold/final preprocessing.
+
+Leakage guarantee (unchanged): balancing is applied only to the training portion of
+each CV fold and to the full 80% training set during final retraining. Validation and
+test samples are never oversampled.
+
+- `python main.py --experiment <preset>` runs a single named preset.
+- `python main.py --ablation preprocessing` runs all seven sequentially.
+- Legacy `--preprocessing <raw|mi|pca|mi+pca|all>` keeps balancing at its default (ON).
+- Each (model, preset) pair writes to `results/<Model>/<preset>/<timestamp>/`, and
+  per-metric comparison tables (Model x seven presets) are written to the results root.

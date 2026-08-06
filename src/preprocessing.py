@@ -92,7 +92,7 @@ def load_and_preprocess(data_dir: str = "data/raw") -> tuple:
 
             df_list.append(df_temp)
         except FileNotFoundError:
-            print(f"  Warning: {fname} not found — skipping.")
+            print(f"  Warning: {fname} not found - skipping.")
 
     if not df_list:
         raise FileNotFoundError(

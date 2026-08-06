@@ -25,13 +25,11 @@ import gc
 import time
 import warnings
 from sklearn.model_selection import StratifiedKFold
-from sklearn.preprocessing import StandardScaler
-from sklearn.decomposition import PCA
-from sklearn.feature_selection import mutual_info_classif, SelectKBest
 from sklearn.metrics import (precision_score, recall_score, f1_score,
                              accuracy_score, roc_auc_score)
 
 from src.balancing import balance_training_fold
+from src.feature_pipeline import PreprocessingConfig, fit_transform_fold
 
 
 # ===================================================================
@@ -69,6 +67,7 @@ def train_and_score_fold(model, X_tr, y_tr, X_val, y_val,
     prec = precision_score(y_val, y_pred, average='weighted', zero_division=0)
     rec = recall_score(y_val, y_pred, average='weighted', zero_division=0)
     f1 = f1_score(y_val, y_pred, average='weighted', zero_division=0)
+    macro_f1 = f1_score(y_val, y_pred, average='macro', zero_division=0)
 
     auc = 0.0
     try:
@@ -78,7 +77,7 @@ def train_and_score_fold(model, X_tr, y_tr, X_val, y_val,
         pass
 
     metrics = {'accuracy': acc, 'precision': prec, 'recall': rec,
-               'f1': f1, 'auc': auc}
+               'f1': f1, 'macro_f1': macro_f1, 'auc': auc}
     if normal_class_idx is not None:
         y_val_binary = (y_val != normal_class_idx).astype(int)
         y_pred_binary = (y_pred != normal_class_idx).astype(int)
@@ -101,6 +100,9 @@ def run_cv(
     n_splits: int = 5,
     mi_k: int = 15,
     pca_variance: float = 0.95,
+    use_mi: bool = True,
+    use_pca: bool = True,
+    use_balancing: bool = True,
     k_neighbors: int = 3,
     random_state: int = 42,
     use_sample_weight: bool = False,
@@ -111,12 +113,12 @@ def run_cv(
     """
     Run Stratified K-Fold CV with per-fold leakage-free preprocessing.
 
-    For each fold:
-      1. Fit MI selector on fold train → transform fold train + val
-      2. Fit StandardScaler on fold train → transform fold train + val
-      3. Fit PCA on scaled fold train → transform fold train + val
-      4. K-means SMOTE on fold train only
-      5. Train model → evaluate on val
+        For each fold:
+            1. Optionally fit MI selector on fold train → transform fold train + val
+            2. Fit StandardScaler on fold train → transform fold train + val
+            3. Optionally fit PCA on scaled fold train → transform fold train + val
+            4. K-means SMOTE on fold train only
+            5. Train model → evaluate on val
 
     Parameters
     ----------
@@ -131,6 +133,7 @@ def run_cv(
     random_state  : int
     use_sample_weight : bool
     strategy      : 'kmeans' | 'smote'
+    use_balancing : bool
     n_clusters    : int           K-means clusters for K-means SMOTE
 
     Returns
@@ -145,12 +148,20 @@ def run_cv(
 
     metrics = {
         'accuracy': [], 'precision': [], 'recall': [],
-        'f1': [], 'auc': [],
+        'f1': [], 'macro_f1': [], 'auc': [],
     }
     if normal_class_idx is not None:
         metrics.update({'binary_accuracy': [], 'binary_f1': []})
 
     selector, scaler, pca = None, None, None
+    preprocessing_config = PreprocessingConfig(
+        use_mi=use_mi,
+        use_pca=use_pca,
+        use_balancing=use_balancing,
+        mi_k=mi_k,
+        pca_n_components=pca_variance,
+        random_state=random_state,
+    )
 
     for fold, (trn_idx, val_idx) in enumerate(skf.split(X_train, y_train)):
         print(f"\n    Fold {fold+1}/{n_splits}")
@@ -159,33 +170,46 @@ def run_cv(
         X_tr, X_val = X_train[trn_idx], X_train[val_idx]
         y_tr, y_val = y_train[trn_idx], y_train[val_idx]
 
-        # --- 1. MI Feature Selection fitted on fold train only ---
-        fold_selector = SelectKBest(score_func=mutual_info_classif, k=mi_k)
-        fold_selector.fit(X_tr, y_tr)
-        X_tr_mi = fold_selector.transform(X_tr)
-        X_val_mi = fold_selector.transform(X_val)
+        if use_balancing:
+            fold_data = fit_transform_fold(
+                X_tr, y_tr, X_val, y_val,
+                config=preprocessing_config,
+                balance_fn=balance_training_fold,
+                balance_kwargs=dict(
+                    strategy=strategy,
+                    k_neighbors=k_neighbors,
+                    n_clusters=n_clusters,
+                    random_state=random_state,
+                ),
+            )
+        else:
+            fold_data = fit_transform_fold(
+                X_tr, y_tr, X_val, y_val,
+                config=preprocessing_config,
+                balance_fn=None,
+                balance_kwargs=None,
+            )
 
-        # --- 2. StandardScaler fitted on fold train only ---
-        fold_scaler = StandardScaler()
-        X_tr_s = fold_scaler.fit_transform(X_tr_mi)
-        X_val_s = fold_scaler.transform(X_val_mi)
+        X_tr_b = fold_data['X_train']
+        y_tr_b = fold_data['y_train']
+        X_val_p = fold_data['X_val']
+        fold_selector = fold_data['selector']
+        fold_scaler = fold_data['scaler']
+        fold_pca = fold_data['pca']
 
-        # --- 3. PCA fitted on scaled fold train only ---
-        fold_pca = PCA(n_components=pca_variance, random_state=random_state)
-        X_tr_p = fold_pca.fit_transform(X_tr_s)
-        X_val_p = fold_pca.transform(X_val_s)
+        mode_parts = []
+        if fold_selector is not None:
+            mode_parts.append(f"MI k={fold_selector.k}")
+        if fold_pca is not None:
+            mode_parts.append(f"PCA components: {X_tr_b.shape[1]}")
+        if not mode_parts:
+            mode_parts.append(f"Raw features: {X_tr_b.shape[1]}")
+        print(f"      {' | '.join(mode_parts)}")
 
-        print(f"      MI k={mi_k} | PCA components: {X_tr_p.shape[1]}")
-
-        # --- 4. Balancing on fold train only ---
-        X_tr_b, y_tr_b = balance_training_fold(
-            X_tr_p, y_tr,
-            strategy=strategy,
-            k_neighbors=k_neighbors,
-            n_clusters=n_clusters,
-            random_state=random_state,
-        )
-        print(f"      Balanced: {X_tr_b.shape[0]:,} samples")
+        if use_balancing:
+            print(f"      Balanced: {X_tr_b.shape[0]:,} samples")
+        else:
+            print(f"      Unbalanced: {X_tr_b.shape[0]:,} samples")
 
         # --- 5. Train + eval ---
         model = model_class(**model_params)
@@ -206,7 +230,6 @@ def run_cv(
         # keep last fold's transformers for final retraining
         selector, scaler, pca = fold_selector, fold_scaler, fold_pca
 
-        del X_tr, X_val, X_tr_mi, X_val_mi, X_tr_s, X_val_s
-        del X_tr_p, X_val_p, X_tr_b, y_tr_b, model; gc.collect()
+        del X_tr, X_val, X_tr_b, y_tr_b, model; gc.collect()
 
     return metrics, selector, scaler, pca

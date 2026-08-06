@@ -1,7 +1,7 @@
 """
 train_dnn.py
 ============
-Deep Neural Network — Baseline (no MI/PCA/balancing, class-weight loss)
+Deep Neural Network - Baseline (no MI/PCA/balancing, class-weight loss)
 
 Uses shared infrastructure from src/dl_pipeline.py.
 Architecture preserved: 2 hidden layers (64→32), LayerNorm, Dropout(0.1).
@@ -64,7 +64,7 @@ def main(data_dir="data/raw"):
 
     # --- Per-fold CV (Scaler only, no MI/PCA/balancing for this model) ---
     print(f"\n{'='*60}")
-    print(f"  {MODEL_NAME} — Baseline DNN (class-weight loss)")
+    print(f"  {MODEL_NAME} - Baseline DNN (class-weight loss)")
     print(f"{'='*60}")
     print(f"\n  Cross-Validation (5 folds)")
 

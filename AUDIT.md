@@ -259,6 +259,69 @@ All 5 DL scripts import `load_data()` from `src.dl_pipeline`, which calls `src.p
 - Returns: binary_acc, binary_f1, multi_acc, macro_f1, weighted_f1, precision, recall, auc
 - Saved to `test_metrics.json` and `*_cv_metrics.csv`
 
+---
+
+## 10. Preprocessing Ablation Extension
+
+The repository now supports a three-switch preprocessing framework:
+
+- `use_mi`
+- `use_pca`
+- `use_balancing`
+
+These switches are combined into seven official preprocessing experiments:
+
+- raw
+- mi
+- mi_balancing
+- pca
+- pca_balancing
+- mi_pca
+- mi_pca_balancing
+
+Implementation notes:
+
+- The shared preprocessing helper remains the single source of truth for MI, scaling, PCA, and optional balancing.
+- Balancing remains train-only inside CV and final retraining.
+- The CLI can execute a single named preset or the full preprocessing ablation suite.
+- Results are saved in experiment-specific directories under `results/<model>/<experiment>/<timestamp>/`.
+
+### 10.1 CLI surface
+
+- `python main.py --experiment <preset>` — run one named preset (`raw`, `mi`, `mi_balancing`, `pca`, `pca_balancing`, `mi_pca`, `mi_pca_balancing`).
+- `python main.py --ablation preprocessing` — run all seven presets sequentially (CV -> final retrain -> locked-test evaluation -> artifacts). No manual execution required.
+- `python main.py --preprocessing <raw|mi|pca|mi+pca|all>` — legacy alias preserved for backward compatibility. Every legacy mode keeps balancing at its default (ON) and only varies the MI/PCA transforms, matching the pre-ablation pipeline.
+
+### 10.2 Result organization
+
+Each `(model, preset)` combination writes to its own timestamped directory, so no experiment overwrites another:
+
+```
+results/<Model>/<preset>/<timestamp>/
+    model.joblib
+    test_metrics.json
+    cv_metrics.csv
+    experiment_config.json
+    binary_cm.png / multiclass_cm.png / roc_curve.png
+```
+
+### 10.3 Comparison tables
+
+Publication-ready per-metric pivot tables (Model x seven presets) are written to the results root for Accuracy, Binary Accuracy, Macro F1, Weighted F1, Binary F1, Precision, Recall and AUC:
+
+```
+results/preprocessing_ablation_test_metrics.csv
+results/preprocessing_ablation_cv_metrics.csv
+results/preprocessing_ablation_<metric>.csv
+```
+
+Both classical test metrics and per-fold CV metrics now include `macro_f1`, alongside `accuracy`, `binary_accuracy`, `f1`, `binary_f1`, `precision`, `recall` and `auc`.
+
+### 10.4 Test coverage
+
+- `tests/test_preprocessing_ablation.py` verifies the seven preset definitions, legacy aliases, CLI flag resolution, and `macro_f1` metric completeness.
+- `tests/test_leakage.py` runs every official preset through `run_cv` and the DL final-retrain path and confirms each remains leakage-free (balancing/transform fitting restricted to training data).
+
 ### 9.4 Model Persistence
 
 | Model Type | Saved To | Format |

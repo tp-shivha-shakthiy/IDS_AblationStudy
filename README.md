@@ -80,15 +80,19 @@ data/raw/UNSW-NB15_{1..4}.csv
           ▼
 [Phase 4] src/dimensionality_reduction.py
   - Stratified 80/20 train/test split (X_test is LOCKED)
-  - StandardScaler and PCA applied inside CV folds only
+  - No fitting occurs on the holdout split
          │
          ▼
 [Phase 6] src/balancing.py + src/cross_validation.py
   - StratifiedKFold (5 folds)
-  - Per fold: MI fit on fold train → transform fold train+val
-  - Per fold: Scaler fit on fold train → transform fold train+val
-  - Per fold: PCA fit on fold train → transform fold train+val
-  - Per fold: SMOTE or KMeansSMOTE on fold train only
+  - Per fold: configurable preprocessing
+      • raw      → Scaler only
+      • mi       → MI → Scaler
+      • pca      → Scaler → PCA
+      • mi+pca   → MI → Scaler → PCA
+      • balancing is a separate switch and can be off
+  - Every fit is restricted to fold-train data
+  - Per fold: SMOTE or KMeansSMOTE on fold train only when balancing is enabled
   - Train model → evaluate on validation fold
          │
      ┌───┼───────────┐
@@ -103,8 +107,8 @@ train_hgb  train_xgboost  train_logistic
   - Confusion matrices (binary + multi-class PNGs)
   - ROC curves (per-class + weighted)
   - Feature importance (XGBoost)
-  - model_comparison.csv, metrics.csv, per-class reports
-  - Artifact persistence (.joblib files)
+  - Preprocessing ablation tables (raw / mi / mi+balancing / pca / pca+balancing / mi+pca / mi+pca+balancing)
+  - Experiment metadata JSON per run
 ```
 
 ### Tier 2: Deep Learning Pipeline (`models/` + `src/dl_pipeline.py`)
@@ -119,10 +123,12 @@ load_data() → preprocessing + stratified split
     │
     ▼ per fold:
 preprocess_fold()
-  - MI SelectKBest(k=30) fit on fold train only
-  - StandardScaler fit on fold train only
-  - PCA(n_components=15) fit on fold train only
-  - RandomUnderSampler(cap=15,000) + KMeansSMOTE(k=2) on fold train only
+  - Configurable preprocessing shared with the sklearn pipeline
+      • raw      → Scaler only
+      • mi       → MI → Scaler
+      • pca      → Scaler → PCA
+      • mi+pca   → MI → Scaler → PCA
+  - Optional RandomUnderSampler(cap=15,000) + KMeansSMOTE(k=2) on fold train only
     │
     ▼
 PyTorch model training (5–10 epochs)
@@ -176,6 +182,7 @@ INTRUSION-DETECTION-SYSTEM/
 │   ├── preprocessing.py                 Load, clean, encode, log1p normalization
 │   ├── dimensionality_reduction.py      Stratified 80/20 split
 │   ├── balancing.py                     SMOTE / KMeansSMOTE per fold
+│   ├── feature_pipeline.py              Shared leakage-free preprocessing (MI / Scaler / PCA / balancing) + experiment presets
 │   ├── cross_validation.py              StratifiedKFold CV runner
 │   ├── evaluation.py                    CM, ROC, feature importance, CSV, artifacts
 │   ├── experiment_config.py             Experiment metadata + JSON persistence
@@ -199,8 +206,9 @@ INTRUSION-DETECTION-SYSTEM/
 │       ├── DNN_MI_PCA_KMeans/
 │       └── XGBoost/
 │
-├── tests/                               Pytest test suite (70+ tests)
-│   ├── test_leakage.py                  Data leakage regression tests
+├── tests/                               Pytest test suite (130+ tests)
+│   ├── test_leakage.py                  Data leakage regression tests (all seven presets)
+│   ├── test_preprocessing_ablation.py   Ablation presets, legacy aliases, flag resolution
 │   ├── test_dl_pipeline.py              DL pipeline correctness tests
 │   └── test_audit_fixes.py              Audit finding regression tests
 │
@@ -219,19 +227,23 @@ INTRUSION-DETECTION-SYSTEM/
 │   ├── logreg_binary_cm.png
 │   └── logreg_multiclass_cm.png
 │
-├── artifacts/                           Saved sklearn preprocessing artifacts
-│   ├── hgb/
-│   ├── xgboost/
-│   └── logistic_regression/
-│
 └── results/                             Output metrics and reports
-    ├── model_comparison.csv             Blind holdout metrics (sklearn models)
-    ├── metrics.csv                      Per-fold CV metrics
-    ├── hgb_per_class_report.csv
-    ├── xgboost_per_class_report.csv
-    ├── logreg_per_class_report.csv
-    └── corrected_pipeline/
-        └── experiment_config.json       Run metadata + hyperparameters
+  ├── preprocessing_ablation_test_metrics.csv
+  ├── preprocessing_ablation_cv_metrics.csv
+  └── HGB/
+    ├── raw/
+    ├── mi/
+    ├── mi_balancing/
+    ├── pca/
+    ├── pca_balancing/
+    ├── mi_pca/
+    └── mi_pca_balancing/
+        └── <timestamp>/
+            ├── model.joblib
+            ├── cv_metrics.csv
+            ├── test_metrics.json
+            ├── experiment_config.json
+            └── *.png
 ```
 
 ---
@@ -245,10 +257,11 @@ INTRUSION-DETECTION-SYSTEM/
 | `preprocessing.py` | Data loading + cleaning | Reads 4 CSVs (47/49 col variants), maps attack categories, drops metadata, LabelEncodes objects, applies log1p normalization. Returns float32 arrays. |
 | `dimensionality_reduction.py` | Train/test split | Stratified 80/20 split only. Scaler/PCA moved inside CV loop to prevent leakage. |
 | `balancing.py` | Class imbalance handling | Two strategies: `"kmeans"` (KMeansSMOTE + MiniBatchKMeans) and `"smote"` (plain SMOTE). Applied only to training data. Handles edge cases (minority_count < 2). |
-| `cross_validation.py` | Stratified CV runner | Per fold: fits MI selector, StandardScaler, PCA, and balancer on fold train. Returns per-fold metrics + last fold's transformers for test evaluation. |
-| `evaluation.py` | Output + visualization | Matplotlib (Agg backend). Saves confusion matrices (binary + multi-class), ROC curves, feature importance plots, CSVs, and .joblib artifacts. |
-| `experiment_config.py` | Experiment metadata | Records seed, split ratio, CV folds, balancer, MI k, PCA variance, timestamps, git commit hash. Saves as JSON. |
-| `dl_pipeline.py` | Shared DL infrastructure | CUDA fallback, per-fold preprocessing (MI→Scaler→PCA→RUS→KMeansSMOTE), batch inference for large validation sets, probability computation, artifact persistence. |
+| `feature_pipeline.py` | Shared configurable preprocessing | `PreprocessingConfig(use_mi, use_pca, use_balancing)`, the seven official presets, legacy CLI aliases, and the leakage-free fit/transform helper used by both pipelines. |
+| `cross_validation.py` | Stratified CV runner | Per fold: applies the shared configurable preprocessing helper, then optionally balances train-only data. Returns per-fold metrics + last fold's transformers for test evaluation. |
+| `evaluation.py` | Output + visualization | Matplotlib (Agg backend). Saves confusion matrices (binary + multi-class), ROC curves, feature importance plots, CSVs, and ablation comparison tables. |
+| `experiment_config.py` | Experiment metadata | Records seed, split ratio, CV folds, balancer, experiment preset, preprocessing flags, timestamps, git commit hash. Saves as JSON. |
+| `dl_pipeline.py` | Shared DL infrastructure | CUDA fallback, shared configurable preprocessing (raw / mi / pca / mi+pca) plus optional balancing, batch inference for large validation sets, probability computation, artifact persistence. |
 
 ### Sklearn Model Trainers (`src/`)
 
@@ -351,13 +364,14 @@ All resampling applied **per fold on training data only**.
 
 ---
 
-## Test Suite — 70+ Regression Tests
+## Test Suite — 130+ Regression Tests
 
 | File | Tests | What It Verifies |
 |---|---|---|
-| `tests/test_leakage.py` | ~35 | Split sizes, per-fold fitting, SMOTE on train only, fold independence, DL no-leakage |
+| `tests/test_leakage.py` | ~60 | Split sizes, per-fold fitting, SMOTE on train only, fold independence, DL no-leakage, all seven preprocessing presets leakage-free |
+| `tests/test_preprocessing_ablation.py` | ~15 | Seven preset definitions, legacy CLI aliases, flag resolution, macro_f1 metric completeness |
 | `tests/test_dl_pipeline.py` | ~30 | AUC validity, LayerNorm (not BatchNorm), probability arrays, k_neighbors floor |
-| `tests/test_audit_fixes.py` | 4 | No hardcoded class indices, runtime options exposed, real KMeansSMOTE |
+| `tests/test_audit_fixes.py` | 6 | No hardcoded class indices, runtime options exposed, real KMeansSMOTE, preprocessing switches |
 
 ```bash
 python -m pytest tests/
@@ -417,6 +431,52 @@ For CPU: `python models/train_LSTM.py --device cpu`
 | `--mi-k` | `15` | Top MI features |
 | `--pca-variance` | `0.95` | PCA variance to retain |
 | `--skip-plots` | off | Skip saving PNGs |
+| `--results-dir` | `results` | Root directory for experiment outputs |
+| `--experiment` | `mi_pca_balancing` | Named preprocessing preset (see below) |
+| `--preprocessing` | — | Legacy alias (`raw` / `mi` / `pca` / `mi+pca` / `all`); balancing stays ON |
+| `--ablation` | — | `preprocessing` → run all seven presets sequentially |
+
+#### Preprocessing experiment presets
+
+The pipeline is driven by three independent switches — `use_mi`, `use_pca`, `use_balancing` — which combine into seven official experiments:
+
+| Preset | MI | PCA | Balancing | CLI |
+|---|---|---|---|---|
+| Raw | OFF | OFF | OFF | `python main.py --experiment raw` |
+| MI | ON | OFF | OFF | `python main.py --experiment mi` |
+| MI + Balancing | ON | OFF | ON | `python main.py --experiment mi_balancing` |
+| PCA | OFF | ON | OFF | `python main.py --experiment pca` |
+| PCA + Balancing | OFF | ON | ON | `python main.py --experiment pca_balancing` |
+| MI + PCA | ON | ON | OFF | `python main.py --experiment mi_pca` |
+| MI + PCA + Balancing | ON | ON | ON | `python main.py --experiment mi_pca_balancing` |
+
+Run the entire ablation suite (all seven, each through CV → final retrain → locked-test evaluation, with separate output directories so no experiment overwrites another):
+
+```bash
+python main.py --ablation preprocessing
+```
+
+Each experiment writes to `results/<Model>/<experiment>/<timestamp>/`:
+
+```
+results/HGB/raw/20260806_.../model.joblib
+results/HGB/raw/20260806_.../test_metrics.json
+results/HGB/raw/20260806_.../cv_metrics.csv
+results/HGB/raw/20260806_.../experiment_config.json
+results/HGB/raw/20260806_.../binary_cm.png
+results/HGB/raw/20260806_.../multiclass_cm.png
+results/HGB/raw/20260806_.../roc_curve.png
+```
+
+Publication-ready comparison tables are written to the results root:
+
+```
+results/preprocessing_ablation_test_metrics.csv
+results/preprocessing_ablation_cv_metrics.csv
+results/preprocessing_ablation_<metric>.csv      # per-metric pivot: Model × 7 presets
+```
+
+with per-metric pivots for Accuracy, Binary Accuracy, Macro F1, Weighted F1, Binary F1, Precision, Recall and AUC.
 
 ---
 
@@ -427,6 +487,10 @@ For CPU: `python models/train_LSTM.py --device cpu`
 | `results/model_comparison.csv` | Blind holdout metrics (sklearn models) |
 | `results/metrics.csv` | Per-fold CV metrics (sklearn models) |
 | `results/*_per_class_report.csv` | Per-class precision/recall/F1 for each sklearn model |
+| `results/preprocessing_ablation_test_metrics.csv` | Test metrics for all seven presets × 3 models |
+| `results/preprocessing_ablation_cv_metrics.csv` | Mean CV metrics for all seven presets × 3 models |
+| `results/preprocessing_ablation_<metric>.csv` | Per-metric pivot tables (Model × seven presets) |
+| `results/<Model>/<experiment>/<timestamp>/` | Per-experiment artifacts: model, test_metrics.json, cv_metrics.csv, experiment_config.json, confusion matrices, ROC curves |
 | `results/corrected_pipeline/experiment_config.json` | Run configuration |
 | `models/artifacts/<model>/*_test_metrics.json` | Blind holdout metrics (DL models) |
 | `models/artifacts/<model>/*_cv_metrics.csv` | Per-fold CV metrics (DL models) |

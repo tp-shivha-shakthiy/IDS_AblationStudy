@@ -191,3 +191,31 @@ The repository is now **methodologically sound**:
 - **Complete persistence**: Models, metrics, confusion matrices, ROC curves, and experiment metadata are saved for every run
 - **Comprehensive tests**: 77 tests verify per-fold independence, no leakage, correct architectures, and correct metrics
 - **Clear documentation**: Updated README, ARCHITECTURE_GAP.md, AUDIT.md, and this report
+
+---
+
+## 9. Preprocessing Ablation Extension
+
+An incremental, non-destructive extension makes balancing an independent
+preprocessing component alongside MI and PCA. The existing configurable pipeline was
+extended (not rewritten) with a third switch:
+
+- `use_mi`
+- `use_pca`
+- `use_balancing`
+
+Seven official experiment presets are predefined combinations of these switches:
+
+- raw, mi, mi_balancing, pca, pca_balancing, mi_pca, mi_pca_balancing
+
+All presets reuse the shared leakage-free preprocessing helper
+(`src/feature_pipeline.py`); balancing is applied only to fold-train / full-train
+data. The CLI supports a single named preset (`--experiment`) and a full automated
+suite (`--ablation preprocessing`) that runs all seven experiments sequentially,
+each through CV -> final retrain -> locked-test evaluation, saving to
+`results/<Model>/<preset>/<timestamp>/`. Publication-ready per-metric comparison
+tables (Model x seven presets) are written to the results root.
+
+The default configuration remains `mi_pca_balancing` (MI ON, PCA ON, Balancing ON),
+so existing invocations (`python main.py`, `--balancer`, `--skip-plots`, ...)
+continue to work exactly as before.

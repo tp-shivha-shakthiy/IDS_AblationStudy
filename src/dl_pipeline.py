@@ -22,15 +22,11 @@ import sys
 import json
 import gc
 import numpy as np
-import pandas as pd
 import torch
 import torch.nn as nn
 import joblib
 from collections import Counter
 
-from sklearn.preprocessing import StandardScaler, LabelEncoder
-from sklearn.decomposition import PCA
-from sklearn.feature_selection import mutual_info_classif, SelectKBest
 from sklearn.model_selection import train_test_split, StratifiedKFold
 from sklearn.metrics import (accuracy_score, f1_score, precision_score,
                              recall_score, roc_auc_score, confusion_matrix,
@@ -42,6 +38,8 @@ from sklearn.cluster import MiniBatchKMeans
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+
+from src.feature_pipeline import PreprocessingConfig, fit_transform_fold, fit_transform_full
 
 
 # ---------------------------------------------------------------------------
@@ -87,6 +85,32 @@ def get_device(requested: str = "auto"):
             device = torch.device('cpu')
     print(f"Device: {device}")
     return device
+
+
+def _balance_dl_training(
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    n_clusters: int = 20,
+    k_neighbors: int = 2,
+    rus_cap: int = 15000,
+    random_state: int = 42,
+):
+    """Apply the DL balancing policy on training data only."""
+    class_counts = Counter(y_train)
+    under_strategy = {c: min(cnt, rus_cap) for c, cnt in class_counts.items()}
+    rus = RandomUnderSampler(sampling_strategy=under_strategy, random_state=random_state)
+    X_train_rus, y_train_rus = rus.fit_resample(X_train, y_train)
+
+    actual_k = min(k_neighbors, min(Counter(y_train_rus).values()) - 1)
+    kms = KMeansSMOTE(
+        cluster_balance_threshold=0.0,
+        k_neighbors=max(actual_k, 1),
+        kmeans_estimator=MiniBatchKMeans(n_init='auto', random_state=random_state),
+        random_state=random_state, n_jobs=1,
+    )
+    X_train_bal, y_train_bal = kms.fit_resample(X_train_rus, y_train_rus)
+    del X_train_rus, y_train_rus, rus, kms; gc.collect()
+    return X_train_bal, y_train_bal
 
 
 # ---------------------------------------------------------------------------
@@ -160,48 +184,38 @@ def preprocess_fold(
         y_val                   (unchanged)
         selector, scaler, pca   (fitted transformers, may be None)
     """
-    selector, scaler, pca = None, None, None
+    config = PreprocessingConfig(
+        use_mi=use_mi,
+        use_pca=use_pca,
+        mi_k=mi_k,
+        pca_n_components=pca_components if use_pca else None,
+        random_state=random_state,
+    )
 
-    # 1. MI Feature Selection (fit on fold train only)
-    if use_mi and mi_k > 0:
-        selector = SelectKBest(score_func=mutual_info_classif, k=min(mi_k, X_tr.shape[1]))
-        selector.fit(X_tr, y_tr)
-        X_tr = selector.transform(X_tr)
-        X_val = selector.transform(X_val)
-
-    # 2. StandardScaler (fit on fold train only)
-    scaler = StandardScaler()
-    X_tr = scaler.fit_transform(X_tr)
-    X_val = scaler.transform(X_val)
-
-    # 3. PCA (fit on fold train only)
-    if use_pca and pca_components > 0:
-        n_comp = min(pca_components, X_tr.shape[1], X_tr.shape[0])
-        pca = PCA(n_components=n_comp, random_state=random_state)
-        X_tr = pca.fit_transform(X_tr)
-        X_val = pca.transform(X_val)
-
-    # 4. Balancing (fold train only, never touch val)
     if use_balancing:
-        class_counts = Counter(y_tr)
-        under_strategy = {c: min(cnt, rus_cap) for c, cnt in class_counts.items()}
-        rus = RandomUnderSampler(sampling_strategy=under_strategy, random_state=random_state)
-        X_tr_rus, y_tr_rus = rus.fit_resample(X_tr, y_tr)
-
-        actual_k = min(k_neighbors, min(Counter(y_tr_rus).values()) - 1)
-        kms = KMeansSMOTE(
-            cluster_balance_threshold=0.0,
-            k_neighbors=max(actual_k, 1),
-            kmeans_estimator=MiniBatchKMeans(n_init='auto', random_state=random_state),
-            random_state=random_state, n_jobs=1,
+        result = fit_transform_fold(
+            X_tr, y_tr, X_val, y_val,
+            config=config,
+            balance_fn=_balance_dl_training,
+            balance_kwargs=dict(
+                n_clusters=n_clusters,
+                k_neighbors=k_neighbors,
+                rus_cap=rus_cap,
+                random_state=random_state,
+            ),
         )
-        X_tr, y_tr = kms.fit_resample(X_tr_rus, y_tr_rus)
-        del X_tr_rus, y_tr_rus, rus, kms; gc.collect()
+    else:
+        result = fit_transform_fold(
+            X_tr, y_tr, X_val, y_val,
+            config=config,
+            balance_fn=None,
+            balance_kwargs=None,
+        )
 
     return {
-        'X_tr': X_tr, 'y_tr': y_tr,
-        'X_val': X_val, 'y_val': y_val,
-        'selector': selector, 'scaler': scaler, 'pca': pca,
+        'X_tr': result['X_train'], 'y_tr': result['y_train'],
+        'X_val': result['X_val'], 'y_val': result['y_val'],
+        'selector': result['selector'], 'scaler': result['scaler'], 'pca': result['pca'],
     }
 
 
@@ -236,51 +250,40 @@ def preprocess_final(
         y_test                        (unchanged)
         selector, scaler, pca         (fitted transformers)
     """
-    selector, scaler, pca = None, None, None
+    config = PreprocessingConfig(
+        use_mi=use_mi,
+        use_pca=use_pca,
+        mi_k=mi_k,
+        pca_n_components=pca_components if use_pca else None,
+        random_state=random_state,
+    )
 
-    # 1. MI (fit on full training only)
-    if use_mi and mi_k > 0:
-        selector = SelectKBest(score_func=mutual_info_classif, k=min(mi_k, X_train.shape[1]))
-        selector.fit(X_train, y_train)
-        X_train = selector.transform(X_train)
-        X_test = selector.transform(X_test)
-
-    # 2. Scaler (fit on full training only)
-    scaler = StandardScaler()
-    X_train = scaler.fit_transform(X_train)
-    X_test = scaler.transform(X_test)
-
-    # 3. PCA (fit on full training only)
-    if use_pca and pca_components > 0:
-        n_comp = min(pca_components, X_train.shape[1], X_train.shape[0])
-        pca = PCA(n_components=n_comp, random_state=random_state)
-        X_train = pca.fit_transform(X_train)
-        X_test = pca.transform(X_test)
-
-    # 4. Balancing — use the same bounded RUS + KMeansSMOTE policy as CV.
-    # Without the cap, KMeansSMOTE tries to expand rare classes to the full
-    # majority-class size on UNSW-NB15, which can exhaust available memory.
     if use_balancing:
-        class_counts = Counter(y_train)
-        under_strategy = {c: min(cnt, rus_cap) for c, cnt in class_counts.items()}
-        rus = RandomUnderSampler(sampling_strategy=under_strategy, random_state=random_state)
-        X_train_rus, y_train_rus = rus.fit_resample(X_train, y_train)
-        actual_k = min(k_neighbors, min(Counter(y_train_rus).values()) - 1)
-        kms = KMeansSMOTE(
-            cluster_balance_threshold=0.0,
-            k_neighbors=max(actual_k, 1),
-            kmeans_estimator=MiniBatchKMeans(n_init='auto', random_state=random_state),
-            random_state=random_state, n_jobs=1,
+        result = fit_transform_full(
+            X_train, y_train, X_test, y_test,
+            config=config,
+            balance_fn=_balance_dl_training,
+            balance_kwargs=dict(
+                n_clusters=n_clusters,
+                k_neighbors=k_neighbors,
+                rus_cap=rus_cap,
+                random_state=random_state,
+            ),
         )
-        X_train, y_train = kms.fit_resample(X_train_rus, y_train_rus)
-        del X_train_rus, y_train_rus, rus, kms; gc.collect()
+    else:
+        result = fit_transform_full(
+            X_train, y_train, X_test, y_test,
+            config=config,
+            balance_fn=None,
+            balance_kwargs=None,
+        )
 
-    print(f"  Final train: {X_train.shape} | Test: {X_test.shape}")
+    print(f"  Final train: {result['X_train'].shape} | Test: {result['X_test'].shape}")
 
     return {
-        'X_train': X_train, 'y_train': y_train,
-        'X_test': X_test, 'y_test': y_test,
-        'selector': selector, 'scaler': scaler, 'pca': pca,
+        'X_train': result['X_train'], 'y_train': result['y_train'],
+        'X_test': result['X_test'], 'y_test': result['y_test'],
+        'selector': result['selector'], 'scaler': result['scaler'], 'pca': result['pca'],
     }
 
 
@@ -413,6 +416,8 @@ def save_dl_artifacts(
     """
     Save model weights, metrics, preprocessing, and architecture metadata.
     """
+    import pandas as pd
+
     if save_dir is None:
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         save_dir = os.path.join(project_root, "models", "artifacts", model_name)
@@ -438,20 +443,20 @@ def save_dl_artifacts(
     ):
         if artifact is not None:
             joblib.dump(artifact, os.path.join(save_dir, filename))
-    print(f"  Model saved → {model_path}")
+    print(f"  Model saved -> {model_path}")
 
     # CV metrics CSV
     cv_df = pd.DataFrame(cv_metrics)
     cv_path = os.path.join(save_dir, f"{model_name.lower()}_cv_metrics.csv")
     cv_df.to_csv(cv_path, index=False, float_format='%.4f')
-    print(f"  CV metrics saved → {cv_path}")
+    print(f"  CV metrics saved -> {cv_path}")
 
     # Test metrics JSON
     if test_metrics:
         json_path = os.path.join(save_dir, f"{model_name.lower()}_test_metrics.json")
         with open(json_path, 'w') as f:
             json.dump(test_metrics, f, indent=2)
-        print(f"  Test metrics saved → {json_path}")
+        print(f"  Test metrics saved -> {json_path}")
 
     # Confusion matrix
     if y_test is not None and y_test_pred is not None and class_names is not None:
@@ -464,7 +469,7 @@ def save_dl_artifacts(
         plt.tight_layout()
         fig.savefig(os.path.join(save_dir, f"{model_name.lower()}_confusion_matrix.png"), dpi=150)
         plt.close(fig)
-        print(f"  Confusion matrix saved → {save_dir}")
+        print(f"  Confusion matrix saved -> {save_dir}")
 
     # Preprocessing artifacts
     return save_dir
