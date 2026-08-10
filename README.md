@@ -31,6 +31,52 @@ The previous pipeline had known methodological issues (data leakage, fold-0 retr
 
 ---
 
+## Ablation Study (Faculty-Requested 7-Experiment Sequence)
+
+The ablation study varies exactly **three factors** while keeping the leakage-free methodology, the model hyperparameters, and the 80/20 split untouched:
+
+- **MI** — mutual-information feature selection (SelectKBest, k=15, fitted on fold/full train only)
+- **PCA** — dimensionality reduction (95% variance, fitted on fold/full train only)
+- **KMeansSMOTE** — K-means SMOTE class balancing (train data only, never val/test)
+
+StandardScaler is **not** an ablation factor — it stays on in every experiment, exactly as the current methodology requires.
+
+| Experiment       | MI | PCA | KMeansSMOTE |
+|------------------|----|-----|-------------|
+| `raw`            | ✗  | ✗   | ✗           |
+| `mi`             | ✓  | ✗   | ✗           |
+| `mi_balancing`   | ✓  | ✗   | ✓           |
+| `pca`            | ✗  | ✓   | ✗           |
+| `pca_balancing`  | ✗  | ✓   | ✓           |
+| `mi_pca`         | ✓  | ✓   | ✗           |
+| `mi_pca_balancing` | ✓  | ✓  | ✓           |
+
+`mi_pca_balancing` is the default and is byte-for-byte the current (corrected) pipeline.
+
+### Running the ablation
+
+```bash
+python main.py --experiment raw            # raw features, no MI/PCA/SMOTE
+python main.py --experiment mi             # MI only
+python main.py --experiment mi_balancing   # MI + KMeansSMOTE
+python main.py --experiment pca            # PCA only
+python main.py --experiment pca_balancing  # PCA + KMeansSMOTE
+python main.py --experiment mi_pca         # MI + PCA
+python main.py --experiment mi_pca_balancing   # full pipeline (default)
+```
+
+Presets are the single source of truth for preprocessing: using `--experiment` together with `--balancer` / `--mi-k` / `--pca-variance` overrides raises a `ValueError`.
+
+Per-experiment outputs are written under `results/<Model>/<experiment>/`. After each run, the per-model comparison tables in `results/<Model>/` are regenerated; once all seven experiments have been run, `ablation_test_metrics.csv` / `ablation_cv_metrics.csv` contain exactly seven rows in the order **Raw, MI, MI+KMeansSMOTE, PCA, PCA+KMeansSMOTE, MI+PCA, MI+PCA+KMeansSMOTE**.
+
+### Leakage invariants — unchanged for every experiment
+
+- MI / Scaler / PCA are fitted on fold-train or full-train only; val/test are only transformed
+- K-means SMOTE is applied to train data only — never val or test
+- The 20% test set is locked and never touched until final evaluation
+
+---
+
 ## Project Structure
 
 ```
@@ -60,7 +106,9 @@ INTRUSION-DETECTION-SYSTEM/
 │   └── train_Bi-LSTM_shared-feature-extractor.py  Multi-task DNN (binary + multi-class heads)
 │
 ├── tests/
-│   └── test_leakage.py                  40 tests: leakage verification + regression
+│   ├── test_leakage.py                  Leakage verification + regression
+│   ├── test_dl_pipeline.py              DL architectures + config schema
+│   └── test_ablation.py                 Ablation presets, toggles, tables (84 total)
 │
 ├── notebooks/
 │   └── Intrusion_Detection.ipynb        Exploratory notebook
@@ -73,8 +121,17 @@ INTRUSION-DETECTION-SYSTEM/
 │
 ├── results/
 │   ├── legacy_pipeline/                 Historical benchmarks (pre-correction)
-│   ├── corrected_pipeline/              Current results + experiment configs
-│   └── comparison/                      Legacy vs corrected side-by-side
+│   ├── corrected_pipeline/              Legacy corrected-run CSVs (reference)
+│   ├── <experiment>/                    Cross-model comparison per experiment
+│   ├── HGB/
+│   │   ├── raw/ … mi_pca_balancing/     Per-experiment: model, metrics, config, plots
+│   │   └── ablation_*.csv               Per-model 7-row ablation tables
+│   ├── XGBoost/
+│   │   ├── raw/ … mi_pca_balancing/
+│   │   └── ablation_*.csv
+│   └── LogReg/
+│       ├── raw/ … mi_pca_balancing/
+│       └── ablation_*.csv
 │
 └── artifacts/                           Model + preprocessing artifacts (joblib)
     ├── hgb/
@@ -233,14 +290,18 @@ python -m pytest tests/test_leakage.py -v
 | Flag | Default | Description |
 |---|---|---|
 | `--data-dir` | `data/raw` | Path to raw CSV files |
+| `--experiment` | `mi_pca_balancing` | Ablation preset: `raw`, `mi`, `mi_balancing`, `pca`, `pca_balancing`, `mi_pca`, `mi_pca_balancing` |
 | `--balancer` | `kmeans` | Balancing strategy: `kmeans` or `smote` |
 | `--n-splits` | `5` | Number of CV folds |
 | `--mi-k` | `15` | Top-k MI features to retain per fold |
 | `--pca-variance` | `0.95` | Cumulative PCA variance to retain |
+| `--cap` | `0` | Cap each class to N samples before oversampling (speed/RAM, e.g. `--cap 15000`) |
+| `--quick` | `0` | Run on a stratified sample of N rows (pipeline smoke test) |
 | `--skip-plots` | off | Skip saving confusion matrix PNGs |
 
 ```bash
-python main.py --balancer smote --mi-k 20 --skip-plots
+python main.py --experiment mi --balancer smote --skip-plots
+python main.py --cap 15000 --quick 200000        # fast verification run
 ```
 
 ---
@@ -298,22 +359,25 @@ Per-class precision, recall, and F1 are saved to `results/corrected_pipeline/*_p
 
 | Path | Description |
 |---|---|
-| `results/corrected_pipeline/model_comparison.csv` | Blind test metrics for all models |
-| `results/corrected_pipeline/metrics.csv` | Per-fold CV metrics |
-| `results/corrected_pipeline/experiment_config.json` | Pipeline parameters + timestamps |
-| `results/corrected_pipeline/*_per_class_report.csv` | Per-class classification reports |
+| `results/<Model>/<experiment>/test_metrics.json` | Blind-test metrics (incl. binary + multiclass) per experiment |
+| `results/<Model>/<experiment>/cv_metrics.csv` | Per-fold CV metrics per experiment |
+| `results/<Model>/<experiment>/experiment_config.json` | Pipeline params + experiment identity (`experiment`, `use_mi`, `use_pca`, `use_balancing`) |
+| `results/<Model>/<experiment>/*_model.joblib` | Trained model |
+| `results/<Model>/<experiment>/{scaler,pca,mi_selector,label_encoder}.joblib` | Fitted transformers |
+| `results/<Model>/<experiment>/*_cm.png`, `*_roc_curve.png` | Confusion matrices + ROC |
+| `results/<Model>/ablation_test_metrics.csv` | 7-row ablation table (test metrics), one per experiment |
+| `results/<Model>/ablation_cv_metrics.csv` | 7-row ablation table (mean CV metrics) |
+| `results/<Model>/ablation_<metric>.csv` | Pivoted metric tables (Model × experiment) |
+| `results/<experiment>/model_comparison.csv` | Blind-test comparison across models for one experiment |
+| `results/<experiment>/metrics.csv` | CV metrics across models for one experiment |
 | `results/legacy_pipeline/` | Historical benchmarks |
-| `results/comparison/legacy_vs_corrected.csv` | Side-by-side comparison |
 | `artifacts/*/model.joblib` | Trained model files |
-| `artifacts/*/scaler.joblib` | Fitted StandardScaler |
-| `artifacts/*/pca.joblib` | Fitted PCA |
-| `artifacts/*/mi_selector.joblib` | Fitted MI selector |
 
 ---
 
 ## Testing
 
-The test suite (`tests/test_leakage.py`) contains 40 tests verifying:
+The test suite contains **84 tests** across `tests/test_leakage.py`, `tests/test_dl_pipeline.py`, and `tests/test_ablation.py`:
 
 - StandardScaler fitted on training data only
 - PCA fitted on training data only
@@ -325,9 +389,13 @@ The test suite (`tests/test_leakage.py`) contains 40 tests verifying:
 - DL pipeline (`dl_pipeline.py`) preprocessing is leakage-free
 - Final retraining uses the full 80% training set (not a CV fold)
 - Test data never enters any balancing function
+- Ablation presets: exactly 7 experiments, correct MI/PCA/balancing flag combos
+- `run_cv()` toggles: MI/PCA/balancing can be disabled without leaking
+- Per-experiment outputs (`test_metrics.json`, `cv_metrics.csv`, `experiment_config.json`)
+- Ablation tables: exactly 7 rows in the required order
 
 ```bash
-python -m pytest tests/test_leakage.py -v
+python -m pytest tests/ -v
 ```
 
 ---
