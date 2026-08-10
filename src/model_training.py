@@ -17,8 +17,10 @@ thin-wrap this function, preserving their original API for main.py.
 import numpy as np
 import gc
 import os
+import json
 import warnings
 import joblib
+import pandas as pd
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 from sklearn.metrics import (precision_score, recall_score, f1_score,
@@ -28,7 +30,7 @@ from src.cross_validation import run_cv
 from src.balancing import balance_full_train
 from src.feature_selection import fit_mi_selector
 from src.evaluation import (plot_confusion_matrix, plot_roc_curve,
-                            plot_feature_importance)
+                            plot_feature_importance, compute_extended_metrics)
 from src.experiment_config import build_experiment_config, save_experiment_config
 
 
@@ -133,6 +135,10 @@ def train_and_evaluate(
     random_state: int = 42,
     rus_cap: int = 0,
     fold_cache: dict = None,
+    use_mi: bool = True,
+    use_pca: bool = True,
+    use_balancing: bool = True,
+    experiment: str = "mi_pca_balancing",
 ) -> dict:
     """
     Full Tier 1 pipeline for any model in MODEL_REGISTRY.
@@ -145,15 +151,19 @@ def train_and_evaluate(
 
     Parameters
     ----------
-    rus_cap    : int   if >0, cap each class to this many samples before
-                       oversampling (speed/RAM saving)
-    fold_cache : dict  optional shared cache of preprocessed CV folds, so
-                       multiple models don't redo MI/Scaler/PCA/SMOTE
+    rus_cap       : int   if >0, cap each class to this many samples before
+                          oversampling (speed/RAM saving)
+    fold_cache    : dict  optional shared cache of preprocessed CV folds, so
+                          multiple models don't redo MI/Scaler/PCA/SMOTE
+    use_mi        : bool  apply mutual-information feature selection
+    use_pca       : bool  apply PCA dimensionality reduction
+    use_balancing : bool  apply K-means SMOTE balancing
+    experiment    : str   ablation preset name (output directory identity)
 
     Returns
     -------
     dict with keys: model, cv_metrics, test_metrics, y_test_pred,
-                    selector, scaler, pca
+                    selector, scaler, pca, experiment, save_dir
     """
     _ensure_registry()
     entry = MODEL_REGISTRY[model_name]
@@ -163,6 +173,10 @@ def train_and_evaluate(
 
     print(f"\n{'='*60}")
     print(f"  {model_name}  {display}")
+    print(f"  Experiment: {experiment}  "
+          f"(MI={'on' if use_mi else 'off'}, "
+          f"PCA={'on' if use_pca else 'off'}, "
+          f"KMeansSMOTE={'on' if use_balancing else 'off'})")
     print(f"{'='*60}")
 
     # --- Step 1: Per-fold CV ---
@@ -179,6 +193,9 @@ def train_and_evaluate(
         strategy="kmeans",
         rus_cap=rus_cap,
         fold_cache=fold_cache,
+        use_mi=use_mi,
+        use_pca=use_pca,
+        use_balancing=use_balancing,
     )
 
     print(f"\n  CV Results ({model_name}):")
@@ -188,50 +205,84 @@ def train_and_evaluate(
     # --- Step 2: Full train → MI → Scaler → PCA → K-means SMOTE → retrain ---
     print(f"\n  === Final Retrain on Full Training Set ===")
 
-    selector = fit_mi_selector(X_train, y_train, k=mi_k, random_state=random_state)
-    X_train_mi = selector.transform(X_train)
-    X_test_mi = selector.transform(X_test)
-    print(f"    MI selected: {X_train_mi.shape[1]} features")
+    if use_mi:
+        selector = fit_mi_selector(X_train, y_train, k=mi_k, random_state=random_state)
+        X_train_mi = selector.transform(X_train)
+        X_test_mi = selector.transform(X_test)
+        print(f"    MI selected: {X_train_mi.shape[1]} features")
+    else:
+        selector = None
+        X_train_mi = X_train
+        X_test_mi = X_test
 
     scaler = StandardScaler()
     X_train_s = scaler.fit_transform(X_train_mi)
 
-    pca = PCA(n_components=pca_variance, random_state=random_state)
-    X_train_p = pca.fit_transform(X_train_s)
-    print(f"    PCA components: {X_train_p.shape[1]}")
+    if use_pca:
+        pca = PCA(n_components=pca_variance, random_state=random_state)
+        X_train_p = pca.fit_transform(X_train_s)
+        print(f"    PCA components: {X_train_p.shape[1]}")
+    else:
+        pca = None
+        X_train_p = X_train_s
 
-    X_train_b, y_train_b = balance_full_train(
-        X_train_p, y_train, strategy="kmeans",
-        k_neighbors=k_neighbors, random_state=random_state,
-        rus_cap=rus_cap,
-    )
+    if use_balancing:
+        X_train_b, y_train_b = balance_full_train(
+            X_train_p, y_train, strategy="kmeans",
+            k_neighbors=k_neighbors, random_state=random_state,
+            rus_cap=rus_cap,
+        )
+    else:
+        X_train_b, y_train_b = X_train_p, y_train
 
-    X_test_p = pca.transform(scaler.transform(X_test_mi))
+    if use_pca:
+        X_test_p = pca.transform(scaler.transform(X_test_mi))
+    else:
+        X_test_p = scaler.transform(X_test_mi)
 
     model, test_metrics, y_test_pred = _train_and_evaluate(
         model_class, model_params,
         X_train_b, y_train_b, X_test_p, y_test,
     )
 
+    # Enrich test metrics with binary + multiclass columns for the
+    # ablation comparison tables (methodology unchanged — metrics only).
+    try:
+        y_proba = model.predict_proba(X_test_p)
+    except Exception:
+        y_proba = None
+    extended = compute_extended_metrics(
+        y_test, y_test_pred, y_proba=y_proba, normal_class_idx=0,
+    )
+    test_metrics.update(extended)
+
     print(f"\n  {model_name} Test Metrics:")
     for k, v in test_metrics.items():
         print(f"    {k:>10s}: {v:.4f}")
 
-    # --- Step 3: Save artifacts ---
-    save_dir = os.path.join("models", "artifacts", model_name)
+    # --- Step 3: Save artifacts (per experiment) ---
+    save_dir = os.path.join("results", model_name, experiment)
     os.makedirs(save_dir, exist_ok=True)
 
     model_path = os.path.join(save_dir, f"{model_name.lower()}_model.joblib")
     joblib.dump(model, model_path)
     print(f"\n  Model saved -> {model_path}")
 
-    joblib.dump(selector, os.path.join(save_dir, "mi_selector.joblib"))
-    joblib.dump(scaler, os.path.join(save_dir, "scaler.joblib"))
-    joblib.dump(pca, os.path.join(save_dir, "pca.joblib"))
+    if selector is not None:
+        joblib.dump(selector, os.path.join(save_dir, "mi_selector.joblib"))
+    if scaler is not None:
+        joblib.dump(scaler, os.path.join(save_dir, "scaler.joblib"))
+    if pca is not None:
+        joblib.dump(pca, os.path.join(save_dir, "pca.joblib"))
 
     config = build_experiment_config(
         model_name=model_name,
         model_params=model_params,
+        experiment_name=experiment,
+        preprocessing_mode=experiment,
+        use_mi=use_mi,
+        use_pca=use_pca,
+        use_balancing=use_balancing,
         mi_k=mi_k,
         pca_variance=pca_variance,
         n_splits=n_splits,
@@ -242,6 +293,15 @@ def train_and_evaluate(
         tier=1,
     )
     save_experiment_config(config, save_dir)
+
+    with open(os.path.join(save_dir, "test_metrics.json"), 'w') as f:
+        json.dump(test_metrics, f, indent=2)
+    print(f"  Test metrics saved -> {os.path.join(save_dir, 'test_metrics.json')}")
+
+    cv_df = pd.DataFrame(cv_metrics)
+    cv_df.to_csv(os.path.join(save_dir, "cv_metrics.csv"), index=False,
+                 float_format='%.4f')
+    print(f"  CV metrics saved -> {os.path.join(save_dir, 'cv_metrics.csv')}")
 
     plot_confusion_matrix(
         y_test, y_test_pred, class_names,
@@ -267,6 +327,8 @@ def train_and_evaluate(
         'selector': selector,
         'scaler': scaler,
         'pca': pca,
+        'experiment': experiment,
+        'save_dir': save_dir,
     }
 
     del X_train_mi, X_test_mi, X_train_s, X_train_p

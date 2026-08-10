@@ -24,7 +24,7 @@ import matplotlib.ticker as ticker
 from sklearn.metrics import (
     confusion_matrix, ConfusionMatrixDisplay,
     accuracy_score, f1_score, classification_report,
-    roc_curve, auc,
+    roc_curve, auc, precision_score, recall_score, roc_auc_score,
 )
 from sklearn.preprocessing import label_binarize
 
@@ -293,35 +293,176 @@ def save_ablation_tables(
     results_dir: str,
     modes: list,
 ) -> None:
-    """Persist raw/MI/PCA/MI+PCA comparison tables for paper-ready export."""
+    """
+    Persist ablation comparison tables for paper-ready export.
+
+    Writes into *results_dir*:
+      ablation_test_metrics.csv   — long form: one row per (Model, Preprocessing)
+      ablation_cv_metrics.csv     — long form: per-experiment mean CV metrics
+      ablation_<metric>.csv       — pivot: Model rows × experiment columns
+
+    Parameters
+    ----------
+    summary_rows : list of dicts with keys Model, Preprocessing + test metrics
+    cv_rows      : list of dicts with keys Model, Preprocessing + cv_* means
+    results_dir  : output directory
+    modes        : ordered experiment labels (columns of the pivots)
+    """
     os.makedirs(results_dir, exist_ok=True)
 
     summary_df = pd.DataFrame(summary_rows)
     cv_df = pd.DataFrame(cv_rows)
 
-    test_summary_path = os.path.join(results_dir, 'preprocessing_ablation_test_metrics.csv')
+    test_summary_path = os.path.join(results_dir, 'ablation_test_metrics.csv')
     summary_df.to_csv(test_summary_path, index=False, float_format='%.4f')
     print(f"  Saved: {test_summary_path}")
 
-    cv_summary_path = os.path.join(results_dir, 'preprocessing_ablation_cv_metrics.csv')
+    cv_summary_path = os.path.join(results_dir, 'ablation_cv_metrics.csv')
     cv_df.to_csv(cv_summary_path, index=False, float_format='%.4f')
     print(f"  Saved: {cv_summary_path}")
 
     metric_cols = [c for c in summary_df.columns if c not in {'Model', 'Preprocessing'}]
     for metric in metric_cols:
-        pivot = summary_df.pivot(index='Model', columns='Preprocessing', values=metric)
-        pivot = pivot.reindex(index=['HGB', 'XGBoost', 'LogReg'], columns=modes)
-        metric_path = os.path.join(results_dir, f'preprocessing_ablation_{metric}.csv')
+        try:
+            pivot = summary_df.pivot(index='Model', columns='Preprocessing', values=metric)
+        except Exception:
+            continue
+        pivot = pivot.reindex(columns=modes)
+        metric_path = os.path.join(results_dir, f'ablation_{metric}.csv')
         pivot.to_csv(metric_path, float_format='%.4f')
         print(f"  Saved: {metric_path}")
 
     cv_metric_cols = [c for c in cv_df.columns if c.startswith('cv_')]
     for metric in cv_metric_cols:
-        pivot = cv_df.pivot(index='Model', columns='Preprocessing', values=metric)
-        pivot = pivot.reindex(index=['HGB', 'XGBoost', 'LogReg'], columns=modes)
-        metric_path = os.path.join(results_dir, f'preprocessing_ablation_{metric}.csv')
+        try:
+            pivot = cv_df.pivot(index='Model', columns='Preprocessing', values=metric)
+        except Exception:
+            continue
+        pivot = pivot.reindex(columns=modes)
+        metric_path = os.path.join(results_dir, f'ablation_{metric}.csv')
         pivot.to_csv(metric_path, float_format='%.4f')
         print(f"  Saved: {metric_path}")
+
+
+def build_model_ablation_rows(
+    model_name: str,
+    experiments_root: str = "results",
+) -> tuple:
+    """
+    Aggregate per-experiment results for one model into table rows.
+
+    Reads  results/<model>/<experiment>/test_metrics.json  and
+           results/<model>/<experiment>/cv_metrics.csv  for each of the
+    seven ablation presets (in canonical order) and returns
+    (summary_rows, cv_rows) ready for save_ablation_tables.
+    """
+    from src.experiment_config import ABLATION_ORDER, ABLATION_DISPLAY_NAMES
+
+    summary_rows, cv_rows = [], []
+    for exp in ABLATION_ORDER:
+        exp_dir = os.path.join(experiments_root, model_name, exp)
+        tm_path = os.path.join(exp_dir, "test_metrics.json")
+        cv_path = os.path.join(exp_dir, "cv_metrics.csv")
+        if not (os.path.exists(tm_path) and os.path.exists(cv_path)):
+            continue
+
+        with open(tm_path, 'r') as f:
+            tm = json.load(f)
+
+        cv_df = pd.read_csv(cv_path)
+        cv_means = {
+            f"cv_{c}": float(cv_df[c].mean())
+            for c in ('accuracy', 'precision', 'recall', 'f1', 'auc')
+            if c in cv_df.columns
+        }
+
+        summary_rows.append({
+            "Model": model_name,
+            "Preprocessing": ABLATION_DISPLAY_NAMES[exp],
+            **tm,
+        })
+        cv_rows.append({
+            "Model": model_name,
+            "Preprocessing": ABLATION_DISPLAY_NAMES[exp],
+            **cv_means,
+        })
+
+    return summary_rows, cv_rows
+
+
+def save_model_ablation_tables(
+    model_name: str,
+    results_root: str = "results",
+) -> None:
+    """
+    Build + save the ablation comparison tables for a single model.
+
+    The ablation_test_metrics.csv / ablation_cv_metrics.csv contain exactly
+    seven rows (Raw, MI, MI+KMeansSMOTE, PCA, PCA+KMeansSMOTE, MI+PCA,
+    MI+PCA+KMeansSMOTE) once all seven experiments have completed.
+    """
+    from src.experiment_config import ABLATION_ORDER, ABLATION_DISPLAY_NAMES
+
+    summary_rows, cv_rows = build_model_ablation_rows(model_name, results_root)
+    if not summary_rows:
+        print(f"  [ablation] No per-experiment results for {model_name} "
+              f"under {results_root}/{model_name}/ — skipping tables.")
+        return
+
+    modes = [ABLATION_DISPLAY_NAMES[e] for e in ABLATION_ORDER]
+    save_ablation_tables(
+        summary_rows, cv_rows,
+        results_dir=os.path.join(results_root, model_name),
+        modes=modes,
+    )
+
+
+def compute_extended_metrics(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    y_proba: np.ndarray = None,
+    normal_class_idx: int = 0,
+) -> dict:
+    """
+    Compute binary + multiclass metrics for the final test evaluation.
+
+    Returns dict with:
+        accuracy, precision, recall, f1, auc           (existing keys)
+        multi_acc, macro_f1, weighted_f1              (multiclass)
+        binary_acc, binary_f1, binary_auc             (Normal vs Attack)
+    """
+    metrics = {
+        'accuracy': accuracy_score(y_true, y_pred),
+        'precision': precision_score(y_true, y_pred, average='weighted', zero_division=0),
+        'recall': recall_score(y_true, y_pred, average='weighted', zero_division=0),
+        'f1': f1_score(y_true, y_pred, average='weighted', zero_division=0),
+        'multi_acc': accuracy_score(y_true, y_pred),
+        'macro_f1': f1_score(y_true, y_pred, average='macro', zero_division=0),
+        'weighted_f1': f1_score(y_true, y_pred, average='weighted', zero_division=0),
+    }
+
+    y_true_bin = np.where(y_true == normal_class_idx, 0, 1)
+    y_pred_bin = np.where(y_pred == normal_class_idx, 0, 1)
+    metrics['binary_acc'] = accuracy_score(y_true_bin, y_pred_bin)
+    metrics['binary_f1'] = f1_score(y_true_bin, y_pred_bin, zero_division=0)
+
+    if y_proba is not None:
+        try:
+            metrics['auc'] = roc_auc_score(
+                y_true, y_proba, multi_class='ovr', average='weighted'
+            )
+        except Exception:
+            metrics['auc'] = 0.0
+        try:
+            p_attack = 1.0 - np.asarray(y_proba)[:, normal_class_idx]
+            metrics['binary_auc'] = roc_auc_score(y_true_bin, p_attack)
+        except Exception:
+            metrics['binary_auc'] = 0.0
+    else:
+        metrics['auc'] = 0.0
+        metrics['binary_auc'] = 0.0
+
+    return metrics
 
 
 # ---------------------------------------------------------------------------

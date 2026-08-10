@@ -83,6 +83,7 @@ def build_experiment_config(
         "balancer": balancer,
         "balancer_k_neighbors": k_neighbors,
         "balancer_rus_cap": rus_cap,
+        "experiment": experiment_name,
         "experiment_name": experiment_name,
         "preprocessing_mode": preprocessing_mode,
         "use_mi": use_mi,
@@ -189,3 +190,65 @@ def build_model_config(model_name: str, **kwargs) -> dict:
     }
     params = param_map.get(model_name, {})
     return build_experiment_config(model_name=model_name, model_params=params, **kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Ablation study presets
+# ---------------------------------------------------------------------------
+#
+# The faculty-requested ablation varies exactly three factors:
+#   MI feature selection, PCA dimensionality reduction, K-means SMOTE.
+# StandardScaler is NOT an ablation factor: it stays on in every experiment
+# exactly as the current leakage-free methodology requires.
+#
+# Preset name        | use_mi | use_pca | use_balancing
+# -------------------|--------|---------|---------------
+# raw                |  off   |   off   |     off
+# mi                 |  on    |   off   |     off
+# mi_balancing       |  on    |   off   |     on
+# pca                |  off   |   on    |     off
+# pca_balancing      |  off   |   on    |     on
+# mi_pca             |  on    |   on    |     off
+# mi_pca_balancing   |  on    |   on    |     on   (default / current behaviour)
+
+ABLATION_PRESETS = {
+    "raw":             dict(use_mi=False, use_pca=False, use_balancing=False),
+    "mi":              dict(use_mi=True,  use_pca=False, use_balancing=False),
+    "mi_balancing":    dict(use_mi=True,  use_pca=False, use_balancing=True),
+    "pca":             dict(use_mi=False, use_pca=True,  use_balancing=False),
+    "pca_balancing":   dict(use_mi=False, use_pca=True,  use_balancing=True),
+    "mi_pca":          dict(use_mi=True,  use_pca=True,  use_balancing=False),
+    "mi_pca_balancing": dict(use_mi=True, use_pca=True,  use_balancing=True),
+}
+
+# Canonical experiment order for comparison tables (exactly 7 rows, in order).
+ABLATION_ORDER = [
+    "raw",
+    "mi",
+    "mi_balancing",
+    "pca",
+    "pca_balancing",
+    "mi_pca",
+    "mi_pca_balancing",
+]
+
+# Paper-friendly labels used in comparison-table 'Preprocessing' column.
+ABLATION_DISPLAY_NAMES = {
+    "raw":             "Raw",
+    "mi":              "MI",
+    "mi_balancing":    "MI+KMeansSMOTE",
+    "pca":             "PCA",
+    "pca_balancing":   "PCA+KMeansSMOTE",
+    "mi_pca":          "MI+PCA",
+    "mi_pca_balancing": "MI+PCA+KMeansSMOTE",
+}
+
+
+def resolve_experiment(experiment: str) -> dict:
+    """Return the (use_mi, use_pca, use_balancing) flags for an ablation preset."""
+    if experiment not in ABLATION_PRESETS:
+        valid = ", ".join(sorted(ABLATION_PRESETS))
+        raise ValueError(
+            f"Unknown experiment '{experiment}'. Valid presets: {valid}"
+        )
+    return dict(ABLATION_PRESETS[experiment])

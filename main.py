@@ -23,8 +23,9 @@ Critical invariants (no data leakage):
 
 Usage
 -----
-  python main.py                        # default data/raw/
+  python main.py                        # default: mi_pca_balancing experiment
   python main.py --data-dir /path/csv   # custom raw data path
+  python main.py --experiment raw       # ablation preset (7 available)
   python main.py --balancer smote        # use regular SMOTE instead
   python main.py --cap 15000             # cap each class before SMOTE (speed/RAM)
   python main.py --quick 200000          # verify pipeline on a stratified sample
@@ -34,6 +35,7 @@ Usage
 import argparse
 import sys
 import time
+import os
 import numpy as np
 import pandas as pd
 
@@ -53,8 +55,15 @@ from src.evaluation               import (
     save_results,
     save_preprocessing_artifacts,
     print_final_summary,
+    save_model_ablation_tables,
 )
-from src.experiment_config        import build_model_config, save_experiment_config
+from src.experiment_config        import (
+    ABLATION_PRESETS,
+    ABLATION_DISPLAY_NAMES,
+    resolve_experiment,
+    save_experiment_config,
+    build_model_config,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -68,6 +77,12 @@ def parse_args():
     parser.add_argument(
         '--data-dir', default='data/raw',
         help='Directory containing UNSW-NB15_1.csv … UNSW-NB15_4.csv'
+    )
+    parser.add_argument(
+        '--experiment', choices=list(ABLATION_PRESETS.keys()), default=None,
+        help='Ablation preset. Exactly one of: '
+             + ', '.join(ABLATION_PRESETS.keys())
+             + ' (default: mi_pca_balancing).'
     )
     parser.add_argument(
         '--balancer', choices=['kmeans', 'smote'], default='kmeans',
@@ -109,6 +124,27 @@ def parse_args():
 def main():
     args = parse_args()
 
+    # Resolve the ablation preset (default = current behaviour, backward compat)
+    experiment = args.experiment or "mi_pca_balancing"
+    flags = resolve_experiment(experiment)
+    use_mi, use_pca, use_balancing = (
+        flags["use_mi"], flags["use_pca"], flags["use_balancing"],
+    )
+    print(f"\n  Experiment: {experiment}  "
+          f"(MI={'on' if use_mi else 'off'}, "
+          f"PCA={'on' if use_pca else 'off'}, "
+          f"KMeansSMOTE={'on' if use_balancing else 'off'})")
+
+    # Presets are the single source of truth for preprocessing. Refuse
+    # contradictory low-level knobs so an experiment can't be silently altered.
+    if experiment != "mi_pca_balancing" and (
+        args.balancer != 'kmeans' or args.mi_k != 15 or args.pca_variance != 0.95
+    ):
+        raise ValueError(
+            f"--experiment {experiment} fixes the preprocessing preset. "
+            "Remove --balancer / --mi-k / --pca-variance overrides."
+        )
+
     # ------------------------------------------------------------------
     # Phase 3 — Preprocessing  (deterministic, no fit on test)
     # ------------------------------------------------------------------
@@ -131,10 +167,10 @@ def main():
 
     # ------------------------------------------------------------------
     # Phase 5 — Per-fold CV is handled inside each trainer:
-    #   MI fit on fold train → transform fold train + val
-    #   StandardScaler fit on fold train → transform fold train + val
-    #   PCA fit on fold train → transform fold train + val
-    #   K-means SMOTE on fold train only
+    #   MI fit on fold train → transform fold train + val   (if use_mi)
+    #   StandardScaler fit on fold train → transform both    (always)
+    #   PCA fit on fold train → transform fold train + val  (if use_pca)
+    #   K-means SMOTE on fold train only                     (if use_balancing)
     # ------------------------------------------------------------------
 
     # ------------------------------------------------------------------
@@ -150,6 +186,10 @@ def main():
         pca_variance=args.pca_variance,
         rus_cap=args.cap,
         fold_cache=fold_cache,
+        use_mi=use_mi,
+        use_pca=use_pca,
+        use_balancing=use_balancing,
+        experiment=experiment,
     )
     print(f"  [main] HGB completed in {time.time()-t0:.1f}s")
 
@@ -165,6 +205,10 @@ def main():
         pca_variance=args.pca_variance,
         rus_cap=args.cap,
         fold_cache=fold_cache,
+        use_mi=use_mi,
+        use_pca=use_pca,
+        use_balancing=use_balancing,
+        experiment=experiment,
     )
     print(f"  [main] XGBoost completed in {time.time()-t0:.1f}s")
 
@@ -180,11 +224,15 @@ def main():
         pca_variance=args.pca_variance,
         rus_cap=args.cap,
         fold_cache=fold_cache,
+        use_mi=use_mi,
+        use_pca=use_pca,
+        use_balancing=use_balancing,
+        experiment=experiment,
     )
     print(f"  [main] LogReg completed in {time.time()-t0:.1f}s")
 
     # ------------------------------------------------------------------
-    # Output Layer — Model Comparison
+    # Output Layer — Model Comparison (per experiment)
     # ------------------------------------------------------------------
     all_test_results = []
     cv_results = {}
@@ -203,37 +251,49 @@ def main():
         all_test_results, cv_results,
         y_true=y_test, y_pred_dict=y_pred_dict,
         class_names=class_names,
+        results_dir=os.path.join("results", experiment),
     )
 
-    # --- Save preprocessing artifacts for each model ---
-    for name, res in [('hgb', hgb_results), ('xgboost', xgb_results),
-                      ('logistic_regression', lr_results)]:
-        artifact_dir = f"artifacts/{name}"
+    # --- Save preprocessing artifacts (incl. label encoder) per experiment ---
+    model_dirs = {
+        'HGB': hgb_results,
+        'XGBoost': xgb_results,
+        'LogReg': lr_results,
+    }
+    for name, res in model_dirs.items():
         save_preprocessing_artifacts(
             selector=res['selector'],
             scaler=res['scaler'],
             pca=res['pca'],
             le=le,
-            save_dir=artifact_dir,
+            save_dir=res['save_dir'],
         )
 
-    # --- Save experiment config for each model ---
-    configs = {
-        'HGB': ('HGB', args),
-        'XGBoost': ('XGBoost', args),
-        'LogReg': ('LogReg', args),
-    }
-    for name, (model_name, a) in configs.items():
+    # --- Save experiment config for the experiment (per model) ---
+    for name, res in model_dirs.items():
         cfg = build_model_config(
-            model_name=model_name,
-            mi_k=a.mi_k,
-            pca_variance=a.pca_variance,
-            n_splits=a.n_splits,
-            balancer=a.balancer,
+            model_name=name,
+            experiment_name=experiment,
+            preprocessing_mode=experiment,
+            use_mi=use_mi,
+            use_pca=use_pca,
+            use_balancing=use_balancing,
+            mi_k=args.mi_k,
+            pca_variance=args.pca_variance,
+            n_splits=args.n_splits,
+            balancer=args.balancer,
             k_neighbors=3,
-            rus_cap=a.cap,
+            rus_cap=args.cap,
         )
-        save_experiment_config(cfg, save_dir="results/corrected_pipeline")
+        save_experiment_config(cfg, save_dir=res['save_dir'])
+
+    # ------------------------------------------------------------------
+    # Ablation comparison tables — regenerate for every model
+    # (rows appear once all seven experiments have been run on disk)
+    # ------------------------------------------------------------------
+    print("\n  === Ablation Comparison Tables ===")
+    for name in model_dirs:
+        save_model_ablation_tables(name, results_root="results")
 
     print("\nPipeline complete.")
 

@@ -99,15 +99,18 @@ def run_cv(
     n_clusters: int = 20,
     rus_cap: int = 0,
     fold_cache: dict = None,
+    use_mi: bool = True,
+    use_pca: bool = True,
+    use_balancing: bool = True,
 ):
     """
     Run Stratified K-Fold CV with per-fold leakage-free preprocessing.
 
     For each fold:
-      1. Fit MI selector on fold train → transform fold train + val
-      2. Fit StandardScaler on fold train → transform fold train + val
-      3. Fit PCA on scaled fold train → transform fold train + val
-      4. K-means SMOTE on fold train only
+      1. Fit MI selector on fold train → transform fold train + val (if use_mi)
+      2. Fit StandardScaler on fold train → transform fold train + val (always)
+      3. Fit PCA on scaled fold train → transform fold train + val (if use_pca)
+      4. K-means SMOTE on fold train only (if use_balancing)
       5. Train model → evaluate on val
 
     Parameters
@@ -128,13 +131,16 @@ def run_cv(
                                   before oversampling (speed/RAM saving)
     fold_cache    : dict          optional cache of preprocessed folds shared
                                   across models with identical preprocessing
+    use_mi        : bool          apply per-fold MI feature selection
+    use_pca       : bool          apply per-fold PCA
+    use_balancing : bool          apply per-fold K-means SMOTE / SMOTE
 
     Returns
     -------
     metrics       : dict  {metric_name: [fold_values]}
-    selector      : fitted SelectKBest  (last fold, for retrain reference)
+    selector      : fitted SelectKBest  (last fold, None when use_mi=False)
     scaler        : fitted StandardScaler (last fold)
-    pca           : fitted PCA            (last fold)
+    pca           : fitted PCA            (last fold, None when use_pca=False)
     """
     skf = StratifiedKFold(n_splits=n_splits, shuffle=True,
                           random_state=random_state)
@@ -147,7 +153,8 @@ def run_cv(
     selector, scaler, pca = None, None, None
 
     cache_key = (n_splits, mi_k, pca_variance, k_neighbors, n_clusters,
-                 random_state, strategy, rus_cap)
+                 random_state, strategy, rus_cap, use_mi, use_pca,
+                 use_balancing)
 
     if fold_cache is not None and cache_key in fold_cache:
         folds = fold_cache[cache_key]
@@ -163,10 +170,14 @@ def run_cv(
             y_tr, y_val = y_train[trn_idx], y_train[val_idx]
 
             # --- 1. MI Feature Selection fitted on fold train only ---
-            fold_selector = fit_mi_selector(X_tr, y_tr, k=mi_k,
-                                            random_state=random_state)
-            X_tr_mi = fold_selector.transform(X_tr)
-            X_val_mi = fold_selector.transform(X_val)
+            if use_mi:
+                fold_selector = fit_mi_selector(X_tr, y_tr, k=mi_k,
+                                                random_state=random_state)
+                X_tr_mi = fold_selector.transform(X_tr)
+                X_val_mi = fold_selector.transform(X_val)
+            else:
+                fold_selector = None
+                X_tr_mi, X_val_mi = X_tr, X_val
 
             # --- 2. StandardScaler fitted on fold train only ---
             fold_scaler = StandardScaler()
@@ -174,23 +185,36 @@ def run_cv(
             X_val_s = fold_scaler.transform(X_val_mi)
 
             # --- 3. PCA fitted on scaled fold train only ---
-            fold_pca = PCA(n_components=pca_variance, random_state=random_state)
-            X_tr_p = fold_pca.fit_transform(X_tr_s)
-            X_val_p = fold_pca.transform(X_val_s)
+            if use_pca:
+                fold_pca = PCA(n_components=pca_variance, random_state=random_state)
+                X_tr_p = fold_pca.fit_transform(X_tr_s)
+                X_val_p = fold_pca.transform(X_val_s)
+            else:
+                fold_pca = None
+                X_tr_p, X_val_p = X_tr_s, X_val_s
 
-            print(f"      MI k={mi_k} | PCA components: {X_tr_p.shape[1]}")
+            transform_desc = " | ".join(
+                part for part in (
+                    f"MI k={mi_k}" if use_mi else None,
+                    f"PCA components: {X_tr_p.shape[1]}" if use_pca else None,
+                ) if part
+            )
+            print(f"      {transform_desc or 'Raw features: ' + str(X_tr_p.shape[1])}")
 
             # --- 4. Balancing on fold train only ---
-            X_tr_b, y_tr_b = balance_training_fold(
-                X_tr_p, y_tr,
-                strategy=strategy,
-                k_neighbors=k_neighbors,
-                n_clusters=n_clusters,
-                random_state=random_state,
-                rus_cap=rus_cap,
-            )
-            elapsed = time.time() - t0
-            print(f"      Balanced: {X_tr_b.shape[0]:,} samples  ({elapsed:.1f}s)")
+            if use_balancing:
+                X_tr_b, y_tr_b = balance_training_fold(
+                    X_tr_p, y_tr,
+                    strategy=strategy,
+                    k_neighbors=k_neighbors,
+                    n_clusters=n_clusters,
+                    random_state=random_state,
+                    rus_cap=rus_cap,
+                )
+                elapsed = time.time() - t0
+                print(f"      Balanced: {X_tr_b.shape[0]:,} samples  ({elapsed:.1f}s)")
+            else:
+                X_tr_b, y_tr_b = X_tr_p, y_tr
 
             folds.append(dict(
                 X_tr_b=X_tr_b, y_tr_b=y_tr_b,
