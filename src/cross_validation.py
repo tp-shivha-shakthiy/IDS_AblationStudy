@@ -97,6 +97,8 @@ def run_cv(
     use_sample_weight: bool = False,
     strategy: str = "kmeans",
     n_clusters: int = 20,
+    rus_cap: int = 0,
+    fold_cache: dict = None,
 ):
     """
     Run Stratified K-Fold CV with per-fold leakage-free preprocessing.
@@ -122,6 +124,10 @@ def run_cv(
     use_sample_weight : bool
     strategy      : 'kmeans' | 'smote'
     n_clusters    : int           K-means clusters for K-means SMOTE
+    rus_cap       : int           if >0, cap each class to this many samples
+                                  before oversampling (speed/RAM saving)
+    fold_cache    : dict          optional cache of preprocessed folds shared
+                                  across models with identical preprocessing
 
     Returns
     -------
@@ -140,44 +146,73 @@ def run_cv(
 
     selector, scaler, pca = None, None, None
 
-    for fold, (trn_idx, val_idx) in enumerate(skf.split(X_train, y_train)):
-        print(f"\n    Fold {fold+1}/{n_splits}")
+    cache_key = (n_splits, mi_k, pca_variance, k_neighbors, n_clusters,
+                 random_state, strategy, rus_cap)
+
+    if fold_cache is not None and cache_key in fold_cache:
+        folds = fold_cache[cache_key]
+        print(f"    [run_cv] Reusing {len(folds)} preprocessed folds from cache")
+    else:
+        # --- Preprocessing: MI -> Scaler -> PCA -> balance (per fold, once) ---
+        folds = []
+        for fold, (trn_idx, val_idx) in enumerate(skf.split(X_train, y_train)):
+            print(f"\n    Fold {fold+1}/{n_splits} (preprocessing)")
+            t0 = time.time()
+
+            X_tr, X_val = X_train[trn_idx], X_train[val_idx]
+            y_tr, y_val = y_train[trn_idx], y_train[val_idx]
+
+            # --- 1. MI Feature Selection fitted on fold train only ---
+            fold_selector = fit_mi_selector(X_tr, y_tr, k=mi_k,
+                                            random_state=random_state)
+            X_tr_mi = fold_selector.transform(X_tr)
+            X_val_mi = fold_selector.transform(X_val)
+
+            # --- 2. StandardScaler fitted on fold train only ---
+            fold_scaler = StandardScaler()
+            X_tr_s = fold_scaler.fit_transform(X_tr_mi)
+            X_val_s = fold_scaler.transform(X_val_mi)
+
+            # --- 3. PCA fitted on scaled fold train only ---
+            fold_pca = PCA(n_components=pca_variance, random_state=random_state)
+            X_tr_p = fold_pca.fit_transform(X_tr_s)
+            X_val_p = fold_pca.transform(X_val_s)
+
+            print(f"      MI k={mi_k} | PCA components: {X_tr_p.shape[1]}")
+
+            # --- 4. Balancing on fold train only ---
+            X_tr_b, y_tr_b = balance_training_fold(
+                X_tr_p, y_tr,
+                strategy=strategy,
+                k_neighbors=k_neighbors,
+                n_clusters=n_clusters,
+                random_state=random_state,
+                rus_cap=rus_cap,
+            )
+            elapsed = time.time() - t0
+            print(f"      Balanced: {X_tr_b.shape[0]:,} samples  ({elapsed:.1f}s)")
+
+            folds.append(dict(
+                X_tr_b=X_tr_b, y_tr_b=y_tr_b,
+                X_val_p=X_val_p, y_val=y_val,
+                selector=fold_selector, scaler=fold_scaler, pca=fold_pca,
+            ))
+
+            del X_tr, X_val, X_tr_mi, X_val_mi, X_tr_s, X_val_s, X_tr_p
+            gc.collect()
+
+        if fold_cache is not None:
+            fold_cache[cache_key] = folds
+
+    # --- Training: fit model + evaluate on each preprocessed fold ---
+    for fold, fold_data in enumerate(folds):
+        print(f"\n    Fold {fold+1}/{n_splits} (training)")
         t0 = time.time()
 
-        X_tr, X_val = X_train[trn_idx], X_train[val_idx]
-        y_tr, y_val = y_train[trn_idx], y_train[val_idx]
-
-        # --- 1. MI Feature Selection fitted on fold train only ---
-        fold_selector = fit_mi_selector(X_tr, y_tr, k=mi_k, random_state=random_state)
-        X_tr_mi = fold_selector.transform(X_tr)
-        X_val_mi = fold_selector.transform(X_val)
-
-        # --- 2. StandardScaler fitted on fold train only ---
-        fold_scaler = StandardScaler()
-        X_tr_s = fold_scaler.fit_transform(X_tr_mi)
-        X_val_s = fold_scaler.transform(X_val_mi)
-
-        # --- 3. PCA fitted on scaled fold train only ---
-        fold_pca = PCA(n_components=pca_variance, random_state=random_state)
-        X_tr_p = fold_pca.fit_transform(X_tr_s)
-        X_val_p = fold_pca.transform(X_val_s)
-
-        print(f"      MI k={mi_k} | PCA components: {X_tr_p.shape[1]}")
-
-        # --- 4. Balancing on fold train only ---
-        X_tr_b, y_tr_b = balance_training_fold(
-            X_tr_p, y_tr,
-            strategy=strategy,
-            k_neighbors=k_neighbors,
-            n_clusters=n_clusters,
-            random_state=random_state,
-        )
-        print(f"      Balanced: {X_tr_b.shape[0]:,} samples")
-
-        # --- 5. Train + eval ---
         model = model_class(**model_params)
         fold_metrics = train_and_score_fold(
-            model, X_tr_b, y_tr_b, X_val_p, y_val,
+            model, fold_data['X_tr_b'], fold_data['y_tr_b'],
+            fold_data['X_val_p'], fold_data['y_val'],
             use_sample_weight=use_sample_weight,
         )
 
@@ -189,10 +224,11 @@ def run_cv(
               f"F1={fold_metrics['f1']:.4f}  "
               f"AUC={fold_metrics['auc']:.4f}  ({elapsed:.1f}s)")
 
-        # keep last fold's transformers for final retraining
-        selector, scaler, pca = fold_selector, fold_scaler, fold_pca
+        # keep last fold's transformers for final retraining reference
+        selector = fold_data['selector']
+        scaler = fold_data['scaler']
+        pca = fold_data['pca']
 
-        del X_tr, X_val, X_tr_mi, X_val_mi, X_tr_s, X_val_s
-        del X_tr_p, X_val_p, X_tr_b, y_tr_b, model; gc.collect()
+        del model; gc.collect()
 
     return metrics, selector, scaler, pca

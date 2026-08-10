@@ -403,20 +403,20 @@ def save_dl_artifacts(
     # Model weights
     model_path = os.path.join(save_dir, f"{model_name.lower()}_model.pt")
     torch.save(model.state_dict(), model_path)
-    print(f"  Model saved → {model_path}")
+    print(f"  Model saved -> {model_path}")
 
     # CV metrics CSV
     cv_df = pd.DataFrame(cv_metrics)
     cv_path = os.path.join(save_dir, f"{model_name.lower()}_cv_metrics.csv")
     cv_df.to_csv(cv_path, index=False, float_format='%.4f')
-    print(f"  CV metrics saved → {cv_path}")
+    print(f"  CV metrics saved -> {cv_path}")
 
     # Test metrics JSON
     if test_metrics:
         json_path = os.path.join(save_dir, f"{model_name.lower()}_test_metrics.json")
         with open(json_path, 'w') as f:
             json.dump(test_metrics, f, indent=2)
-        print(f"  Test metrics saved → {json_path}")
+        print(f"  Test metrics saved -> {json_path}")
 
     # Confusion matrix
     if y_test is not None and y_test_pred is not None and class_names is not None:
@@ -429,7 +429,7 @@ def save_dl_artifacts(
         plt.tight_layout()
         fig.savefig(os.path.join(save_dir, f"{model_name.lower()}_confusion_matrix.png"), dpi=150)
         plt.close(fig)
-        print(f"  Confusion matrix saved → {save_dir}")
+        print(f"  Confusion matrix saved -> {save_dir}")
 
     # Preprocessing artifacts (for inference reproducibility)
     if selector is not None:
@@ -451,6 +451,6 @@ def save_dl_artifacts(
     config_path = os.path.join(save_dir, "config.json")
     with open(config_path, 'w') as f:
         json.dump(config, f, indent=2)
-    print(f"  Config saved → {config_path}")
+    print(f"  Config saved -> {config_path}")
 
     return save_dir

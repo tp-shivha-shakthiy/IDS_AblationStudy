@@ -11,6 +11,13 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Windows consoles default to cp1252; reconfigure so Unicode output never crashes.
+try:
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+except Exception:
+    pass
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -69,7 +76,7 @@ def main(data_dir="data/raw"):
     class_names = data['class_names']
 
     print(f"\n{'='*60}")
-    print(f"  {MODEL_NAME} — DNN + MI(30) + PCA(15) + KMeansSMOTE")
+    print(f"  {MODEL_NAME} - DNN + MI(30) + PCA(15) + KMeansSMOTE")
     print(f"{'='*60}")
     print(f"\n  Cross-Validation (5 folds)")
 

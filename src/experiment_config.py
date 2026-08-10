@@ -48,6 +48,7 @@ def build_experiment_config(
     test_size: float = 0.20,
     tier: int = 1,
     dl_extra: dict = None,
+    rus_cap: int = 0,
 ) -> dict:
     """
     Build an experiment configuration dict with a unified schema.
@@ -81,6 +82,7 @@ def build_experiment_config(
         "cv_folds": n_splits,
         "balancer": balancer,
         "balancer_k_neighbors": k_neighbors,
+        "balancer_rus_cap": rus_cap,
         "experiment_name": experiment_name,
         "preprocessing_mode": preprocessing_mode,
         "use_mi": use_mi,

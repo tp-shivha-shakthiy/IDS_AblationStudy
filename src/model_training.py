@@ -63,7 +63,7 @@ MODEL_REGISTRY = {
         "model_class_path": "sklearn.linear_model.LogisticRegression",
         "model_class": None,
         "params": dict(
-            multi_class='multinomial', solver='saga',
+            solver='saga',
             max_iter=50, random_state=42, n_jobs=-1,
         ),
         "display_name": "Logistic Regression (saga / multinomial)",
@@ -131,15 +131,24 @@ def train_and_evaluate(
     pca_variance: float = 0.95,
     k_neighbors: int = 3,
     random_state: int = 42,
+    rus_cap: int = 0,
+    fold_cache: dict = None,
 ) -> dict:
     """
     Full Tier 1 pipeline for any model in MODEL_REGISTRY.
 
     Steps:
-      1. Per-fold CV (MI → Scaler → PCA → K-means SMOTE → train → eval)
-      2. Full train → MI → Scaler → PCA → K-means SMOTE → retrain
+      1. Per-fold CV (MI -> Scaler -> PCA -> K-means SMOTE -> train -> eval)
+      2. Full train -> MI -> Scaler -> PCA -> K-means SMOTE -> retrain
       3. Single evaluation on locked test set
       4. Save model, confusion matrix, ROC curve, feature importance
+
+    Parameters
+    ----------
+    rus_cap    : int   if >0, cap each class to this many samples before
+                       oversampling (speed/RAM saving)
+    fold_cache : dict  optional shared cache of preprocessed CV folds, so
+                       multiple models don't redo MI/Scaler/PCA/SMOTE
 
     Returns
     -------
@@ -168,6 +177,8 @@ def train_and_evaluate(
         k_neighbors=k_neighbors,
         random_state=random_state,
         strategy="kmeans",
+        rus_cap=rus_cap,
+        fold_cache=fold_cache,
     )
 
     print(f"\n  CV Results ({model_name}):")
@@ -192,6 +203,7 @@ def train_and_evaluate(
     X_train_b, y_train_b = balance_full_train(
         X_train_p, y_train, strategy="kmeans",
         k_neighbors=k_neighbors, random_state=random_state,
+        rus_cap=rus_cap,
     )
 
     X_test_p = pca.transform(scaler.transform(X_test_mi))
@@ -211,7 +223,7 @@ def train_and_evaluate(
 
     model_path = os.path.join(save_dir, f"{model_name.lower()}_model.joblib")
     joblib.dump(model, model_path)
-    print(f"\n  Model saved → {model_path}")
+    print(f"\n  Model saved -> {model_path}")
 
     joblib.dump(selector, os.path.join(save_dir, "mi_selector.joblib"))
     joblib.dump(scaler, os.path.join(save_dir, "scaler.joblib"))
@@ -226,6 +238,7 @@ def train_and_evaluate(
         balancer="kmeans",
         k_neighbors=k_neighbors,
         random_state=random_state,
+        rus_cap=rus_cap,
         tier=1,
     )
     save_experiment_config(config, save_dir)

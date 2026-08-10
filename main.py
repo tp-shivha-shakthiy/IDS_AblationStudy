@@ -26,12 +26,23 @@ Usage
   python main.py                        # default data/raw/
   python main.py --data-dir /path/csv   # custom raw data path
   python main.py --balancer smote        # use regular SMOTE instead
+  python main.py --cap 15000             # cap each class before SMOTE (speed/RAM)
+  python main.py --quick 200000          # verify pipeline on a stratified sample
   python main.py --skip-plots            # skip matplotlib output
 """
 
 import argparse
+import sys
+import time
 import numpy as np
 import pandas as pd
+
+# Windows consoles default to cp1252; reconfigure so Unicode output never crashes.
+try:
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+except Exception:
+    pass
 
 from src.preprocessing            import load_and_preprocess
 from src.dimensionality_reduction import split_data
@@ -78,6 +89,16 @@ def parse_args():
         '--skip-plots', action='store_true',
         help='Skip saving confusion matrices and feature importance plots'
     )
+    parser.add_argument(
+        '--cap', type=int, default=0,
+        help='Cap each class to N samples before oversampling '
+             '(0 = no cap; e.g. 15000 for fast runs within 20GB RAM)'
+    )
+    parser.add_argument(
+        '--quick', type=int, default=0,
+        help='Run on a stratified random sample of N rows '
+             '(e.g. --quick 200000) to verify the pipeline end-to-end'
+    )
     return parser.parse_args()
 
 
@@ -93,6 +114,14 @@ def main():
     # ------------------------------------------------------------------
     X_processed, y_multi, le = load_and_preprocess(data_dir=args.data_dir)
     class_names = list(le.classes_)
+
+    if args.quick > 0 and args.quick < X_processed.shape[0]:
+        from sklearn.model_selection import train_test_split
+        X_processed, _, y_multi, _ = train_test_split(
+            X_processed, y_multi,
+            train_size=args.quick, stratify=y_multi, random_state=42,
+        )
+        print(f"  [quick] Stratified sample: {X_processed.shape[0]:,} rows")
 
     # ------------------------------------------------------------------
     # Phase 4 — Stratified 80/20 Holdout Split  (NO fitting here)
@@ -111,35 +140,48 @@ def main():
     # ------------------------------------------------------------------
     # Phase 6 — HistGradientBoosting  (CV + retrain + test eval)
     # ------------------------------------------------------------------
+    fold_cache = {}   # shared so HGB/XGBoost/LogReg reuse preprocessed folds
+    t0 = time.time()
     hgb_results = train_hgb(
         X_train, y_train, X_test, y_test,
         class_names=class_names,
         n_splits=args.n_splits,
         mi_k=args.mi_k,
         pca_variance=args.pca_variance,
+        rus_cap=args.cap,
+        fold_cache=fold_cache,
     )
+    print(f"  [main] HGB completed in {time.time()-t0:.1f}s")
 
     # ------------------------------------------------------------------
     # Phase 7 — XGBoost  (CV + retrain + test eval)
     # ------------------------------------------------------------------
+    t0 = time.time()
     xgb_results = train_xgboost(
         X_train, y_train, X_test, y_test,
         class_names=class_names,
         n_splits=args.n_splits,
         mi_k=args.mi_k,
         pca_variance=args.pca_variance,
+        rus_cap=args.cap,
+        fold_cache=fold_cache,
     )
+    print(f"  [main] XGBoost completed in {time.time()-t0:.1f}s")
 
     # ------------------------------------------------------------------
     # Phase 8 — Logistic Regression  (CV + retrain + test eval)
     # ------------------------------------------------------------------
+    t0 = time.time()
     lr_results = train_logistic(
         X_train, y_train, X_test, y_test,
         class_names=class_names,
         n_splits=args.n_splits,
         mi_k=args.mi_k,
         pca_variance=args.pca_variance,
+        rus_cap=args.cap,
+        fold_cache=fold_cache,
     )
+    print(f"  [main] LogReg completed in {time.time()-t0:.1f}s")
 
     # ------------------------------------------------------------------
     # Output Layer — Model Comparison
@@ -189,6 +231,7 @@ def main():
             n_splits=a.n_splits,
             balancer=a.balancer,
             k_neighbors=3,
+            rus_cap=a.cap,
         )
         save_experiment_config(cfg, save_dir="results/corrected_pipeline")
 
