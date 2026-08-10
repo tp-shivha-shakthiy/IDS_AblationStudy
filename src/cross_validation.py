@@ -32,6 +32,7 @@ from sklearn.metrics import (precision_score, recall_score, f1_score,
 
 from src.balancing import balance_training_fold
 from src.feature_selection import fit_mi_selector
+from src.preprocessing import fit_categorical_encoder, transform_features
 
 
 # ===================================================================
@@ -166,7 +167,13 @@ def run_cv(
             print(f"\n    Fold {fold+1}/{n_splits} (preprocessing)")
             t0 = time.time()
 
-            X_tr, X_val = X_train[trn_idx], X_train[val_idx]
+            if hasattr(X_train, 'iloc'):
+                X_tr_raw, X_val_raw = X_train.iloc[trn_idx], X_train.iloc[val_idx]
+                categorical_encoder = fit_categorical_encoder(X_tr_raw)
+                X_tr = transform_features(X_tr_raw, categorical_encoder)
+                X_val = transform_features(X_val_raw, categorical_encoder)
+            else:
+                X_tr, X_val = X_train[trn_idx], X_train[val_idx]
             y_tr, y_val = y_train[trn_idx], y_train[val_idx]
 
             # --- 1. MI Feature Selection fitted on fold train only ---

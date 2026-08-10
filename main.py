@@ -26,7 +26,7 @@ Usage
   python main.py                        # default: mi_pca_balancing experiment
   python main.py --data-dir /path/csv   # custom raw data path
   python main.py --experiment raw       # ablation preset (7 available)
-  python main.py --balancer smote        # use regular SMOTE instead
+   python main.py --aggregate-ablation    # validate and build final 7-row tables
   python main.py --cap 15000             # cap each class before SMOTE (speed/RAM)
   python main.py --quick 200000          # verify pipeline on a stratified sample
   python main.py --skip-plots            # skip matplotlib output
@@ -46,7 +46,7 @@ try:
 except Exception:
     pass
 
-from src.preprocessing            import load_and_preprocess
+from src.preprocessing            import load_and_prepare
 from src.dimensionality_reduction import split_data
 from src.train_hgb                import train_and_evaluate as train_hgb
 from src.train_xgboost            import train_and_evaluate as train_xgboost
@@ -56,6 +56,7 @@ from src.evaluation               import (
     save_preprocessing_artifacts,
     print_final_summary,
     save_model_ablation_tables,
+    build_model_ablation_rows,
 )
 from src.experiment_config        import (
     ABLATION_PRESETS,
@@ -85,8 +86,8 @@ def parse_args():
              + ' (default: mi_pca_balancing).'
     )
     parser.add_argument(
-        '--balancer', choices=['kmeans', 'smote'], default='kmeans',
-        help='Class-balancing strategy (default: kmeans)'
+        '--aggregate-ablation', action='store_true',
+        help='Validate all seven experiments and generate final ablation tables'
     )
     parser.add_argument(
         '--n-splits', type=int, default=5,
@@ -124,6 +125,16 @@ def parse_args():
 def main():
     args = parse_args()
 
+    if args.aggregate_ablation:
+        model_names = ('HGB', 'XGBoost', 'LogReg')
+        # Validate every model before writing any table for this aggregation run.
+        for name in model_names:
+            build_model_ablation_rows(name, experiments_root="results")
+        for name in model_names:
+            save_model_ablation_tables(name, results_root="results")
+        print("\nAblation comparison tables generated.")
+        return
+
     # Resolve the ablation preset (default = current behaviour, backward compat)
     experiment = args.experiment or "mi_pca_balancing"
     flags = resolve_experiment(experiment)
@@ -138,32 +149,32 @@ def main():
     # Presets are the single source of truth for preprocessing. Refuse
     # contradictory low-level knobs so an experiment can't be silently altered.
     if experiment != "mi_pca_balancing" and (
-        args.balancer != 'kmeans' or args.mi_k != 15 or args.pca_variance != 0.95
+        args.mi_k != 15 or args.pca_variance != 0.95
     ):
         raise ValueError(
             f"--experiment {experiment} fixes the preprocessing preset. "
-            "Remove --balancer / --mi-k / --pca-variance overrides."
+            "Remove --mi-k / --pca-variance overrides."
         )
 
     # ------------------------------------------------------------------
     # Phase 3 — Preprocessing  (deterministic, no fit on test)
     # ------------------------------------------------------------------
-    X_processed, y_multi, le = load_and_preprocess(data_dir=args.data_dir)
+    X_raw, y_multi, le = load_and_prepare(data_dir=args.data_dir)
     class_names = list(le.classes_)
 
-    if args.quick > 0 and args.quick < X_processed.shape[0]:
+    if args.quick > 0 and args.quick < X_raw.shape[0]:
         from sklearn.model_selection import train_test_split
-        X_processed, _, y_multi, _ = train_test_split(
-            X_processed, y_multi,
+        X_raw, _, y_multi, _ = train_test_split(
+            X_raw, y_multi,
             train_size=args.quick, stratify=y_multi, random_state=42,
         )
-        print(f"  [quick] Stratified sample: {X_processed.shape[0]:,} rows")
+        print(f"  [quick] Stratified sample: {X_raw.shape[0]:,} rows")
 
     # ------------------------------------------------------------------
     # Phase 4 — Stratified 80/20 Holdout Split  (NO fitting here)
     # ------------------------------------------------------------------
-    X_train, X_test, y_train, y_test = split_data(X_processed, y_multi)
-    del X_processed
+    X_train, X_test, y_train, y_test = split_data(X_raw, y_multi)
+    del X_raw
 
     # ------------------------------------------------------------------
     # Phase 5 — Per-fold CV is handled inside each trainer:
@@ -266,6 +277,7 @@ def main():
             scaler=res['scaler'],
             pca=res['pca'],
             le=le,
+            categorical_encoder=res['categorical_encoder'],
             save_dir=res['save_dir'],
         )
 
@@ -281,19 +293,11 @@ def main():
             mi_k=args.mi_k,
             pca_variance=args.pca_variance,
             n_splits=args.n_splits,
-            balancer=args.balancer,
+            balancer="kmeans",
             k_neighbors=3,
             rus_cap=args.cap,
         )
         save_experiment_config(cfg, save_dir=res['save_dir'])
-
-    # ------------------------------------------------------------------
-    # Ablation comparison tables — regenerate for every model
-    # (rows appear once all seven experiments have been run on disk)
-    # ------------------------------------------------------------------
-    print("\n  === Ablation Comparison Tables ===")
-    for name in model_dirs:
-        save_model_ablation_tables(name, results_root="results")
 
     print("\nPipeline complete.")
 

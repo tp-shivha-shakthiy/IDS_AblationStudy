@@ -203,6 +203,38 @@ class TestRunCvToggles:
         assert len(selector.scores_) == X_train.shape[1]
         assert scaler.mean_.shape[0] == 8  # MI-selected feature count
 
+    @pytest.mark.parametrize("experiment", ABLATION_ORDER)
+    def test_every_preset_exercises_its_preprocessing_branches(
+        self, split_dataset, experiment
+    ):
+        from unittest.mock import patch
+        from src.cross_validation import run_cv
+        from src.feature_selection import fit_mi_selector
+        from src.balancing import balance_training_fold
+        from sklearn.ensemble import HistGradientBoostingClassifier
+
+        X_train, _, y_train, _ = split_dataset
+        flags = ABLATION_PRESETS[experiment]
+        with patch("src.cross_validation.fit_mi_selector", wraps=fit_mi_selector) as mi_mock, \
+             patch("src.cross_validation.balance_training_fold", wraps=balance_training_fold) as balance_mock:
+            _, selector, _, pca = run_cv(
+                X_train, y_train,
+                model_class=HistGradientBoostingClassifier,
+                model_params=dict(max_iter=5, random_state=42),
+                n_splits=2, mi_k=8, pca_variance=0.95, k_neighbors=2,
+                random_state=42, strategy="smote",
+                use_mi=flags["use_mi"], use_pca=flags["use_pca"],
+                use_balancing=flags["use_balancing"],
+            )
+
+        assert (mi_mock.call_count > 0) is flags["use_mi"]
+        assert (selector is not None) is flags["use_mi"]
+        assert (pca is not None) is flags["use_pca"]
+        assert (balance_mock.call_count > 0) is flags["use_balancing"]
+        for call in balance_mock.call_args_list:
+            # Each fold train is 200 samples; validation is the other 200.
+            assert call.args[0].shape[0] == 200
+
 
 # ---------------------------------------------------------------------------
 # 4. train_and_evaluate() per-experiment outputs
@@ -312,6 +344,15 @@ class TestAblationTables:
                 {"accuracy": 0.91, "precision": 0.89, "recall": 0.88,
                  "f1": 0.89, "auc": 0.96},
             ]).to_csv(os.path.join(exp_dir, "cv_metrics.csv"), index=False)
+            with open(os.path.join(exp_dir, "experiment_config.json"), 'w') as f:
+                json.dump({
+                    "experiment": exp, "experiment_name": exp,
+                    **ABLATION_PRESETS[exp], "seed": 42,
+                    "feature_selection_k": 15, "pca_variance": 0.95,
+                    "balancer": "kmeans", "cv_folds": 5,
+                    "balancer_k_neighbors": 3, "balancer_rus_cap": 0,
+                }, f)
+            open(os.path.join(exp_dir, f"{model.lower()}_model.joblib"), 'wb').close()
 
     def test_table_has_seven_rows_in_order(self, tmp_path):
         from src.evaluation import save_model_ablation_tables
@@ -330,13 +371,22 @@ class TestAblationTables:
         assert len(cv_df) == 7
         assert cv_df["Preprocessing"].tolist() == df["Preprocessing"].tolist()
 
-    def test_build_rows_skips_missing_experiments(self, tmp_path):
+    def test_build_rows_rejects_missing_experiments(self, tmp_path):
         self._fabricate_experiments(str(tmp_path))
-        # Remove one experiment -> only 6 rows should be aggregated
         exp = ABLATION_ORDER[3]
         os.remove(os.path.join(str(tmp_path), "HGB", exp, "test_metrics.json"))
 
-        summary, cv = build_model_ablation_rows("HGB", str(tmp_path))
-        assert len(summary) == 6
-        assert len(cv) == 6
-        assert "PCA" not in [r["Preprocessing"] for r in summary]
+        with pytest.raises(ValueError, match="pca.*test_metrics.json"):
+            build_model_ablation_rows("HGB", str(tmp_path))
+
+    def test_build_rows_rejects_configuration_mismatch(self, tmp_path):
+        self._fabricate_experiments(str(tmp_path))
+        path = os.path.join(str(tmp_path), "HGB", "raw", "experiment_config.json")
+        with open(path) as f:
+            config = json.load(f)
+        config["use_balancing"] = True
+        with open(path, 'w') as f:
+            json.dump(config, f)
+
+        with pytest.raises(ValueError, match="use_balancing"):
+            build_model_ablation_rows("HGB", str(tmp_path))

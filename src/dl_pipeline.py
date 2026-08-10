@@ -40,6 +40,7 @@ from imblearn.over_sampling import SMOTE, KMeansSMOTE
 from imblearn.under_sampling import RandomUnderSampler
 
 from src.feature_selection import fit_mi_selector
+from src.preprocessing import fit_categorical_encoder, transform_features
 
 import matplotlib
 matplotlib.use('Agg')
@@ -86,16 +87,16 @@ def load_data(data_dir: str = "data/raw"):
     if project_root not in sys.path:
         sys.path.insert(0, project_root)
 
-    from src.preprocessing import load_and_preprocess
+    from src.preprocessing import load_and_prepare, fit_categorical_encoder, transform_features
     from src.dimensionality_reduction import split_data
 
-    X_processed, y_multi, le = load_and_preprocess(data_dir=data_dir)
+    X_raw, y_multi, le = load_and_prepare(data_dir=data_dir)
     class_names = list(le.classes_)
     num_classes = len(class_names)
     normal_class_idx = list(le.classes_).index('Normal')
 
-    X_train, X_test, y_train, y_test = split_data(X_processed, y_multi)
-    del X_processed; gc.collect()
+    X_train, X_test, y_train, y_test = split_data(X_raw, y_multi)
+    del X_raw; gc.collect()
 
     return {
         'X_train': X_train, 'X_test': X_test,
@@ -138,7 +139,12 @@ def preprocess_fold(
         y_val                   (unchanged)
         selector, scaler, pca   (fitted transformers, may be None)
     """
-    selector, scaler, pca = None, None, None
+    selector, scaler, pca, categorical_encoder = None, None, None, None
+
+    if hasattr(X_tr, 'select_dtypes'):
+        categorical_encoder = fit_categorical_encoder(X_tr)
+        X_tr = transform_features(X_tr, categorical_encoder)
+        X_val = transform_features(X_val, categorical_encoder)
 
     # 1. MI Feature Selection (fit on fold train only)
     if use_mi and mi_k > 0:
@@ -179,6 +185,7 @@ def preprocess_fold(
         'X_tr': X_tr, 'y_tr': y_tr,
         'X_val': X_val, 'y_val': y_val,
         'selector': selector, 'scaler': scaler, 'pca': pca,
+        'categorical_encoder': categorical_encoder,
     }
 
 
@@ -213,7 +220,12 @@ def preprocess_final(
         y_test                        (unchanged)
         selector, scaler, pca         (fitted transformers)
     """
-    selector, scaler, pca = None, None, None
+    selector, scaler, pca, categorical_encoder = None, None, None, None
+
+    if hasattr(X_train, 'select_dtypes'):
+        categorical_encoder = fit_categorical_encoder(X_train)
+        X_train = transform_features(X_train, categorical_encoder)
+        X_test = transform_features(X_test, categorical_encoder)
 
     # 1. MI (fit on full training only)
     if use_mi and mi_k > 0:
@@ -256,6 +268,7 @@ def preprocess_final(
         'X_train': X_train, 'y_train': y_train,
         'X_test': X_test, 'y_test': y_test,
         'selector': selector, 'scaler': scaler, 'pca': pca,
+        'categorical_encoder': categorical_encoder,
     }
 
 

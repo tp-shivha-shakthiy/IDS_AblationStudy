@@ -199,6 +199,7 @@ def save_preprocessing_artifacts(
     scaler=None,
     pca=None,
     le=None,
+    categorical_encoder=None,
     save_dir: str = "artifacts",
 ) -> None:
     """
@@ -223,6 +224,10 @@ def save_preprocessing_artifacts(
     if le is not None:
         path = os.path.join(save_dir, "label_encoder.joblib")
         joblib.dump(le, path)
+
+    if categorical_encoder is not None:
+        path = os.path.join(save_dir, "categorical_encoder.joblib")
+        joblib.dump(categorical_encoder, path)
 
     print(f"  Preprocessing artifacts saved -> {save_dir}/")
 
@@ -321,7 +326,8 @@ def save_ablation_tables(
     cv_df.to_csv(cv_summary_path, index=False, float_format='%.4f')
     print(f"  Saved: {cv_summary_path}")
 
-    metric_cols = [c for c in summary_df.columns if c not in {'Model', 'Preprocessing'}]
+    metadata_cols = {'Model', 'Experiment', 'Preprocessing', 'MI', 'PCA', 'KMeansSMOTE'}
+    metric_cols = [c for c in summary_df.columns if c not in metadata_cols]
     for metric in metric_cols:
         try:
             pivot = summary_df.pivot(index='Model', columns='Preprocessing', values=metric)
@@ -358,14 +364,76 @@ def build_model_ablation_rows(
     """
     from src.experiment_config import ABLATION_ORDER, ABLATION_DISPLAY_NAMES
 
-    summary_rows, cv_rows = [], []
+    from src.experiment_config import ABLATION_PRESETS
+
+    records = []
     for exp in ABLATION_ORDER:
         exp_dir = os.path.join(experiments_root, model_name, exp)
+        config_path = os.path.join(exp_dir, "experiment_config.json")
         tm_path = os.path.join(exp_dir, "test_metrics.json")
         cv_path = os.path.join(exp_dir, "cv_metrics.csv")
-        if not (os.path.exists(tm_path) and os.path.exists(cv_path)):
-            continue
+        model_path = os.path.join(exp_dir, f"{model_name.lower()}_model.joblib")
+        missing = [
+            name for name, path in (
+                ('experiment_config.json', config_path),
+                ('test_metrics.json', tm_path),
+                ('cv_metrics.csv', cv_path),
+                (os.path.basename(model_path), model_path),
+            ) if not os.path.isfile(path)
+        ]
+        if missing:
+            raise ValueError(
+                f"Cannot aggregate {model_name}: experiment '{exp}' is missing "
+                f"{', '.join(missing)} under {exp_dir}."
+            )
 
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+        expected = ABLATION_PRESETS[exp]
+        if config.get('experiment') != exp or config.get('experiment_name') != exp:
+            raise ValueError(
+                f"Cannot aggregate {model_name}: configuration in '{exp}' does not "
+                "identify the matching experiment."
+            )
+        for key, value in expected.items():
+            if config.get(key) is not value:
+                raise ValueError(
+                    f"Cannot aggregate {model_name}: configuration mismatch for '{exp}': "
+                    f"{key} must be {value}."
+                )
+
+        required_metadata = ('seed', 'feature_selection_k', 'pca_variance',
+                             'balancer', 'cv_folds')
+        absent = [key for key in required_metadata if key not in config]
+        if absent:
+            raise ValueError(
+                f"Cannot aggregate {model_name}: configuration for '{exp}' is missing "
+                f"reproducibility metadata: {', '.join(absent)}."
+            )
+        if config['balancer'] != 'kmeans':
+            raise ValueError(
+                f"Cannot aggregate {model_name}: configuration for '{exp}' must use KMeansSMOTE."
+            )
+
+        records.append((exp, config, tm_path, cv_path))
+
+    reference = records[0][1]
+    reproducibility_keys = ('seed', 'feature_selection_k', 'pca_variance',
+                            'balancer', 'cv_folds', 'balancer_k_neighbors',
+                            'balancer_rus_cap')
+    for exp, config, _, _ in records[1:]:
+        inconsistent = [
+            key for key in reproducibility_keys
+            if config.get(key) != reference.get(key)
+        ]
+        if inconsistent:
+            raise ValueError(
+                f"Cannot aggregate {model_name}: reproducibility metadata differs for "
+                f"'{exp}': {', '.join(inconsistent)}."
+            )
+
+    summary_rows, cv_rows = [], []
+    for exp, _, tm_path, cv_path in records:
         with open(tm_path, 'r') as f:
             tm = json.load(f)
 
@@ -378,12 +446,20 @@ def build_model_ablation_rows(
 
         summary_rows.append({
             "Model": model_name,
+            "Experiment": ABLATION_DISPLAY_NAMES[exp],
             "Preprocessing": ABLATION_DISPLAY_NAMES[exp],
+            "MI": "Yes" if ABLATION_PRESETS[exp]['use_mi'] else "No",
+            "PCA": "Yes" if ABLATION_PRESETS[exp]['use_pca'] else "No",
+            "KMeansSMOTE": "Yes" if ABLATION_PRESETS[exp]['use_balancing'] else "No",
             **tm,
         })
         cv_rows.append({
             "Model": model_name,
+            "Experiment": ABLATION_DISPLAY_NAMES[exp],
             "Preprocessing": ABLATION_DISPLAY_NAMES[exp],
+            "MI": "Yes" if ABLATION_PRESETS[exp]['use_mi'] else "No",
+            "PCA": "Yes" if ABLATION_PRESETS[exp]['use_pca'] else "No",
+            "KMeansSMOTE": "Yes" if ABLATION_PRESETS[exp]['use_balancing'] else "No",
             **cv_means,
         })
 
@@ -404,11 +480,6 @@ def save_model_ablation_tables(
     from src.experiment_config import ABLATION_ORDER, ABLATION_DISPLAY_NAMES
 
     summary_rows, cv_rows = build_model_ablation_rows(model_name, results_root)
-    if not summary_rows:
-        print(f"  [ablation] No per-experiment results for {model_name} "
-              f"under {results_root}/{model_name}/ — skipping tables.")
-        return
-
     modes = [ABLATION_DISPLAY_NAMES[e] for e in ABLATION_ORDER]
     save_ablation_tables(
         summary_rows, cv_rows,

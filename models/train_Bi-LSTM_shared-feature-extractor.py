@@ -97,8 +97,8 @@ def main(data_dir="data/raw"):
 
     for fold, (trn_idx, val_idx) in enumerate(skf.split(X_train, y_train), 1):
         print(f"\n  Fold {fold}/5")
-        X_tr, y_tr = X_train[trn_idx], y_train[trn_idx]
-        X_val, y_val = X_train[val_idx], y_train[val_idx]
+        X_tr, y_tr = X_train.iloc[trn_idx], y_train[trn_idx]
+        X_val, y_val = X_train.iloc[val_idx], y_train[val_idx]
 
         fold_data = preprocess_fold(
             X_tr, y_tr, X_val, y_val,

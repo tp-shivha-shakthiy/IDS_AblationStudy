@@ -6,11 +6,11 @@ Phase 3 — Preprocessing Layer
 Handles:
   - Loading raw UNSW-NB15 CSV files
   - Target column cleaning and class mapping
-  - Label encoding (categorical features + target)
+   - Target label encoding and deterministic feature cleaning
   - Log1p normalisation (scale stabilisation)
 
 Returns:
-  X_processed  : float32 numpy array  (log-normalised feature matrix)
+   X_features   : DataFrame (unencoded feature matrix)
   y_multi      : int numpy array       (encoded multi-class labels)
   le           : fitted LabelEncoder   (target, shared across all modules)
 """
@@ -18,7 +18,7 @@ Returns:
 import pandas as pd
 import numpy as np
 import gc
-from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import LabelEncoder, OrdinalEncoder
 
 
 # ---------------------------------------------------------------------------
@@ -58,9 +58,12 @@ TARGET_COL = 'attack_cat'
 # Public API
 # ---------------------------------------------------------------------------
 
-def load_and_preprocess(data_dir: str = "data/raw") -> tuple:
+def load_and_prepare(data_dir: str = "data/raw") -> tuple:
     """
-    Load all UNSW-NB15 CSV files from *data_dir*, clean and preprocess them.
+    Load all UNSW-NB15 CSV files and perform only pre-split-safe preparation.
+
+    Categorical feature encoding is deliberately excluded here.  It is a
+    learned operation and must be fitted after the final holdout split.
 
     Parameters
     ----------
@@ -69,7 +72,7 @@ def load_and_preprocess(data_dir: str = "data/raw") -> tuple:
 
     Returns
     -------
-    X_processed : np.ndarray  shape (N, F)   float32, log-normalised
+    X_features  : pd.DataFrame shape (N, F)  unencoded feature matrix
     y_multi     : np.ndarray  shape (N,)     int, encoded attack categories
     le          : LabelEncoder               fitted on target column
     """
@@ -129,24 +132,42 @@ def load_and_preprocess(data_dir: str = "data/raw") -> tuple:
     del df; gc.collect()
 
     # ------------------------------------------------------------------
-    # 4. Encode remaining categorical columns
+    # 4. Keep remaining categorical columns unencoded.  Their encoder is fit
+    # after the holdout split, using training data only.
     # ------------------------------------------------------------------
     cat_cols = X_raw.select_dtypes(include=['object']).columns.tolist()
-    print(f"  Encoding categorical features: {cat_cols}")
-    for col in cat_cols:
-        X_raw[col] = LabelEncoder().fit_transform(X_raw[col].astype(str))
+    print(f"  Categorical features deferred until post-split encoding: {cat_cols}")
+    print(f"  Pre-split preparation complete. Feature matrix shape: {X_raw.shape}")
+    return X_raw, y_multi, le
 
-    # ------------------------------------------------------------------
-    # 5. Log1p normalisation  (clip → log1p → fillna)
-    # ------------------------------------------------------------------
-    print("  Applying log1p normalisation ...")
-    X_processed = (
-        np.log1p(X_raw.clip(lower=0))
+
+def fit_categorical_encoder(X_train: pd.DataFrame):
+    """Fit an unknown-safe categorical encoder on training features only."""
+    cat_cols = X_train.select_dtypes(include=['object']).columns.tolist()
+    if not cat_cols:
+        return None
+
+    encoder = OrdinalEncoder(
+        handle_unknown='use_encoded_value', unknown_value=-1,
+        dtype=np.float32,
+    )
+    encoder.fit(X_train[cat_cols].astype(str))
+    return encoder
+
+
+def transform_features(X: pd.DataFrame, categorical_encoder) -> np.ndarray:
+    """Encode with a train-fitted encoder, then apply deterministic transforms."""
+    X_out = X.copy()
+    if categorical_encoder is not None:
+        cat_cols = list(categorical_encoder.feature_names_in_)
+        X_out.loc[:, cat_cols] = categorical_encoder.transform(
+            X_out[cat_cols].astype(str)
+        )
+
+    X_out = X_out.apply(pd.to_numeric, errors='coerce')
+    return (
+        np.log1p(X_out.clip(lower=0))
         .fillna(0)
         .astype('float32')
         .values
     )
-    del X_raw; gc.collect()
-
-    print(f"  Preprocessing complete. Feature matrix shape: {X_processed.shape}")
-    return X_processed, y_multi, le

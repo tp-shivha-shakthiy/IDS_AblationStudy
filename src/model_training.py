@@ -29,6 +29,7 @@ from sklearn.metrics import (precision_score, recall_score, f1_score,
 from src.cross_validation import run_cv
 from src.balancing import balance_full_train
 from src.feature_selection import fit_mi_selector
+from src.preprocessing import fit_categorical_encoder, transform_features
 from src.evaluation import (plot_confusion_matrix, plot_roc_curve,
                             plot_feature_importance, compute_extended_metrics)
 from src.experiment_config import build_experiment_config, save_experiment_config
@@ -205,6 +206,13 @@ def train_and_evaluate(
     # --- Step 2: Full train → MI → Scaler → PCA → K-means SMOTE → retrain ---
     print(f"\n  === Final Retrain on Full Training Set ===")
 
+    if hasattr(X_train, 'select_dtypes'):
+        categorical_encoder = fit_categorical_encoder(X_train)
+        X_train = transform_features(X_train, categorical_encoder)
+        X_test = transform_features(X_test, categorical_encoder)
+    else:
+        categorical_encoder = None
+
     if use_mi:
         selector = fit_mi_selector(X_train, y_train, k=mi_k, random_state=random_state)
         X_train_mi = selector.transform(X_train)
@@ -327,6 +335,7 @@ def train_and_evaluate(
         'selector': selector,
         'scaler': scaler,
         'pca': pca,
+        'categorical_encoder': categorical_encoder,
         'experiment': experiment,
         'save_dir': save_dir,
     }

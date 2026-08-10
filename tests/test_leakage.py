@@ -89,6 +89,49 @@ class TestNoPreprocessingLeakage:
         assert X_tr_mi.shape == (len(X_train), 10)
         assert X_te_mi.shape == (len(X_test), 10)
 
+    def test_categorical_encoder_is_fit_on_train_only_and_handles_unknowns(self):
+        import pandas as pd
+        from src.preprocessing import fit_categorical_encoder, transform_features
+
+        X_train = pd.DataFrame({
+            "proto": ["tcp", "udp", "tcp"], "dur": [1.0, 2.0, 3.0],
+        })
+        X_test = pd.DataFrame({
+            "proto": ["icmp", "tcp"], "dur": [4.0, 5.0],
+        })
+        encoder = fit_categorical_encoder(X_train)
+
+        # The test-only category cannot be present in an encoder fit on train.
+        assert "icmp" not in encoder.categories_[0]
+        X_train_out = transform_features(X_train, encoder)
+        X_test_out = transform_features(X_test, encoder)
+        assert X_train_out.shape == (3, 2)
+        assert X_test_out.shape == (2, 2)
+        assert np.isfinite(X_test_out).all()
+
+    def test_cv_categorical_encoder_is_fit_per_fold_on_fold_training_only(self):
+        import pandas as pd
+        from unittest.mock import patch
+        from sklearn.ensemble import HistGradientBoostingClassifier
+        from src.cross_validation import run_cv
+        from src.preprocessing import fit_categorical_encoder
+
+        X = pd.DataFrame({
+            "proto": ["tcp", "udp", "icmp", "tcp"] * 25,
+            "dur": np.arange(100, dtype=float),
+        })
+        y = np.array([0, 1] * 50)
+        with patch("src.cross_validation.fit_categorical_encoder",
+                   wraps=fit_categorical_encoder) as encoder_fit:
+            run_cv(
+                X, y, HistGradientBoostingClassifier,
+                dict(max_iter=5, random_state=42), n_splits=2,
+                mi_k=1, use_mi=False, use_pca=False, use_balancing=False,
+            )
+
+        assert encoder_fit.call_count == 2
+        assert all(call.args[0].shape[0] == 50 for call in encoder_fit.call_args_list)
+
 
 # ---------------------------------------------------------------------------
 # Test 2: PCA is fitted only on training data
