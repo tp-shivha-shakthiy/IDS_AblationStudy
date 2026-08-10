@@ -27,8 +27,7 @@ Usage
   python main.py --data-dir /path/csv   # custom raw data path
   python main.py --experiment raw       # ablation preset (7 available)
    python main.py --aggregate-ablation    # validate and build final 7-row tables
-  python main.py --cap 15000             # cap each class before SMOTE (speed/RAM)
-  python main.py --quick 200000          # verify pipeline on a stratified sample
+   python main.py --quick 200000          # verify pipeline on a stratified sample
   python main.py --skip-plots            # skip matplotlib output
 """
 
@@ -90,25 +89,8 @@ def parse_args():
         help='Validate all seven experiments and generate final ablation tables'
     )
     parser.add_argument(
-        '--n-splits', type=int, default=5,
-        help='Number of CV folds (default: 5)'
-    )
-    parser.add_argument(
-        '--mi-k', type=int, default=15,
-        help='Top-k MI features to retain per fold (default: 15)'
-    )
-    parser.add_argument(
-        '--pca-variance', type=float, default=0.95,
-        help='Cumulative PCA variance to retain (default: 0.95)'
-    )
-    parser.add_argument(
         '--skip-plots', action='store_true',
         help='Skip saving confusion matrices and feature importance plots'
-    )
-    parser.add_argument(
-        '--cap', type=int, default=0,
-        help='Cap each class to N samples before oversampling '
-             '(0 = no cap; e.g. 15000 for fast runs within 20GB RAM)'
     )
     parser.add_argument(
         '--quick', type=int, default=0,
@@ -146,16 +128,6 @@ def main():
           f"PCA={'on' if use_pca else 'off'}, "
           f"KMeansSMOTE={'on' if use_balancing else 'off'})")
 
-    # Presets are the single source of truth for preprocessing. Refuse
-    # contradictory low-level knobs so an experiment can't be silently altered.
-    if experiment != "mi_pca_balancing" and (
-        args.mi_k != 15 or args.pca_variance != 0.95
-    ):
-        raise ValueError(
-            f"--experiment {experiment} fixes the preprocessing preset. "
-            "Remove --mi-k / --pca-variance overrides."
-        )
-
     # ------------------------------------------------------------------
     # Phase 3 — Preprocessing  (deterministic, no fit on test)
     # ------------------------------------------------------------------
@@ -192,10 +164,10 @@ def main():
     hgb_results = train_hgb(
         X_train, y_train, X_test, y_test,
         class_names=class_names,
-        n_splits=args.n_splits,
-        mi_k=args.mi_k,
-        pca_variance=args.pca_variance,
-        rus_cap=args.cap,
+        n_splits=5,
+        mi_k=15,
+        pca_variance=0.95,
+        rus_cap=0,
         fold_cache=fold_cache,
         use_mi=use_mi,
         use_pca=use_pca,
@@ -211,10 +183,10 @@ def main():
     xgb_results = train_xgboost(
         X_train, y_train, X_test, y_test,
         class_names=class_names,
-        n_splits=args.n_splits,
-        mi_k=args.mi_k,
-        pca_variance=args.pca_variance,
-        rus_cap=args.cap,
+        n_splits=5,
+        mi_k=15,
+        pca_variance=0.95,
+        rus_cap=0,
         fold_cache=fold_cache,
         use_mi=use_mi,
         use_pca=use_pca,
@@ -230,10 +202,10 @@ def main():
     lr_results = train_logistic(
         X_train, y_train, X_test, y_test,
         class_names=class_names,
-        n_splits=args.n_splits,
-        mi_k=args.mi_k,
-        pca_variance=args.pca_variance,
-        rus_cap=args.cap,
+        n_splits=5,
+        mi_k=15,
+        pca_variance=0.95,
+        rus_cap=0,
         fold_cache=fold_cache,
         use_mi=use_mi,
         use_pca=use_pca,
@@ -290,12 +262,12 @@ def main():
             use_mi=use_mi,
             use_pca=use_pca,
             use_balancing=use_balancing,
-            mi_k=args.mi_k,
-            pca_variance=args.pca_variance,
-            n_splits=args.n_splits,
+            mi_k=15,
+            pca_variance=0.95,
+            n_splits=5,
             balancer="kmeans",
             k_neighbors=3,
-            rus_cap=args.cap,
+            rus_cap=0,
         )
         save_experiment_config(cfg, save_dir=res['save_dir'])
 

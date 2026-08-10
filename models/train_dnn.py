@@ -28,7 +28,7 @@ from sklearn.model_selection import StratifiedKFold
 from src.dl_pipeline import (
     set_seeds, get_device, load_data,
     compute_class_weights, evaluate_with_proba, get_probabilities,
-    save_dl_artifacts,
+    save_dl_artifacts, preprocess_fold, preprocess_final,
 )
 from src.experiment_config import build_experiment_config
 
@@ -80,18 +80,17 @@ def main(data_dir="data/raw"):
     skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
     cv_metrics = []
 
-    class_weights = compute_class_weights(y_train, device)
-
     for fold, (trn_idx, val_idx) in enumerate(skf.split(X_train, y_train), 1):
         print(f"\n  Fold {fold}/5")
         X_tr, y_tr = X_train.iloc[trn_idx], y_train[trn_idx]
         X_val, y_val = X_train.iloc[val_idx], y_train[val_idx]
 
-        # Scaler fitted on fold train only
-        from sklearn.preprocessing import StandardScaler
-        scaler = StandardScaler()
-        X_tr_s = scaler.fit_transform(X_tr)
-        X_val_s = scaler.transform(X_val)
+        fold_data = preprocess_fold(
+            X_tr, y_tr, X_val, y_val,
+            use_mi=False, use_pca=False, use_balancing=False,
+        )
+        X_tr_s, X_val_s = fold_data['X_tr'], fold_data['X_val']
+        fold_weights = compute_class_weights(y_tr, device)
 
         X_tr_t = torch.tensor(X_tr_s, dtype=torch.float32)
         y_tr_t = torch.tensor(y_tr, dtype=torch.long)
@@ -102,8 +101,8 @@ def main(data_dir="data/raw"):
             drop_last=True,
         )
 
-        model = DeepNeuralNetwork(X_tr.shape[1], num_classes).to(device)
-        criterion = nn.CrossEntropyLoss(weight=class_weights)
+        model = DeepNeuralNetwork(X_tr_s.shape[1], num_classes).to(device)
+        criterion = nn.CrossEntropyLoss(weight=fold_weights)
         optimizer = optim.AdamW(model.parameters(), lr=0.01, weight_decay=1e-4)
 
         model.train()
@@ -127,13 +126,15 @@ def main(data_dir="data/raw"):
 
     # --- Final retrain on full training set ---
     print(f"\n  === Final Retrain ===")
-    from sklearn.preprocessing import StandardScaler
-    scaler = StandardScaler()
-    X_train_s = scaler.fit_transform(X_train)
-    X_test_s = scaler.transform(X_test)
+    final_data = preprocess_final(
+        X_train, y_train, X_test, y_test,
+        use_mi=False, use_pca=False, use_balancing=False,
+    )
+    X_train_s, X_test_s = final_data['X_train'], final_data['X_test']
+    final_weights = compute_class_weights(final_data['y_train'], device)
 
     X_tr_t = torch.tensor(X_train_s, dtype=torch.float32)
-    y_tr_t = torch.tensor(y_train, dtype=torch.long)
+    y_tr_t = torch.tensor(final_data['y_train'], dtype=torch.long)
     X_te_t = torch.tensor(X_test_s, dtype=torch.float32)
 
     train_loader = DataLoader(
@@ -141,8 +142,8 @@ def main(data_dir="data/raw"):
         drop_last=True,
     )
 
-    final_model = DeepNeuralNetwork(X_train.shape[1], num_classes).to(device)
-    criterion = nn.CrossEntropyLoss(weight=class_weights)
+    final_model = DeepNeuralNetwork(X_train_s.shape[1], num_classes).to(device)
+    criterion = nn.CrossEntropyLoss(weight=final_weights)
     optimizer = optim.AdamW(final_model.parameters(), lr=0.01, weight_decay=1e-4)
 
     final_model.train()
@@ -175,7 +176,7 @@ def main(data_dir="data/raw"):
         class_names=class_names,
         normal_class_idx=normal_class_idx,
         y_test=y_test, y_test_pred=test_preds,
-        scaler=scaler,
+        scaler=final_data['scaler'],
         le=data['le'],
         config=build_experiment_config(
             model_name=MODEL_NAME,

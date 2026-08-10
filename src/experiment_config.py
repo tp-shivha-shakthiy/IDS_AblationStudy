@@ -76,6 +76,7 @@ def build_experiment_config(
     config = {
         "model": model_name,
         "tier": tier,
+        "ablation_scope": "tier1" if tier == 1 else "excluded_tier2",
         "seed": random_state,
         "train_test_split": f"{int((1 - test_size) * 100)}/{int(test_size * 100)}",
         "test_size": test_size,

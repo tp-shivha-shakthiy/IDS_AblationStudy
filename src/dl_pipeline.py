@@ -15,6 +15,9 @@ Provides:
 
 All DL model scripts should import from this module instead of
 duplicating preprocessing, MI, PCA, balancing, or evaluation code.
+
+Tier 2 models are explicitly excluded from the faculty Tier 1 seven-preset
+ablation.  Their configurations record ``ablation_scope=excluded_tier2``.
 """
 
 import os
@@ -45,6 +48,9 @@ from src.preprocessing import fit_categorical_encoder, transform_features
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+
+
+TIER2_ABLATION_SCOPE = "excluded_tier2"
 
 
 # ---------------------------------------------------------------------------

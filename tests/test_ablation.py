@@ -347,6 +347,7 @@ class TestAblationTables:
             with open(os.path.join(exp_dir, "experiment_config.json"), 'w') as f:
                 json.dump({
                     "experiment": exp, "experiment_name": exp,
+                    "tier": 1, "ablation_scope": "tier1",
                     **ABLATION_PRESETS[exp], "seed": 42,
                     "feature_selection_k": 15, "pca_variance": 0.95,
                     "balancer": "kmeans", "cv_folds": 5,
@@ -390,3 +391,43 @@ class TestAblationTables:
 
         with pytest.raises(ValueError, match="use_balancing"):
             build_model_ablation_rows("HGB", str(tmp_path))
+
+    def test_build_rows_rejects_noncanonical_cv_metadata(self, tmp_path):
+        self._fabricate_experiments(str(tmp_path))
+        path = os.path.join(str(tmp_path), "HGB", "raw", "experiment_config.json")
+        with open(path) as f:
+            config = json.load(f)
+        config["cv_folds"] = 2
+        with open(path, 'w') as f:
+            json.dump(config, f)
+
+        with pytest.raises(ValueError, match="cv_folds=5"):
+            build_model_ablation_rows("HGB", str(tmp_path))
+
+    def test_synthetic_seven_experiment_kmeans_run_aggregates(self, split_dataset, tmp_path, monkeypatch):
+        from src.model_training import train_and_evaluate
+        from src.evaluation import save_model_ablation_tables
+        import src.model_training as training
+
+        X_train, X_test, y_train, y_test = split_dataset
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(training, "plot_confusion_matrix", lambda *args, **kwargs: None)
+        monkeypatch.setattr(training, "plot_roc_curve", lambda *args, **kwargs: None)
+        monkeypatch.setattr(training, "plot_feature_importance", lambda *args, **kwargs: None)
+
+        for experiment in ABLATION_ORDER:
+            flags = ABLATION_PRESETS[experiment]
+            train_and_evaluate(
+                "HGB", X_train, y_train, X_test, y_test,
+                class_names=["c0", "c1", "c2", "c3", "c4"],
+                n_splits=5, mi_k=15, pca_variance=0.95, k_neighbors=3,
+                use_mi=flags["use_mi"], use_pca=flags["use_pca"],
+                use_balancing=flags["use_balancing"], experiment=experiment,
+            )
+
+        save_model_ablation_tables("HGB")
+        table = pd.read_csv("results/HGB/ablation_test_metrics.csv")
+        assert len(table) == 7
+        assert table["Preprocessing"].tolist() == [
+            ABLATION_DISPLAY_NAMES[experiment] for experiment in ABLATION_ORDER
+        ]

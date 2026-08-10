@@ -50,6 +50,13 @@ CATEGORY_MAPPING = {
     'worms': 'Worms',
 }
 
+# Fixed, dataset-defined target vocabulary.  This avoids fitting a target
+# encoder on labels that will later form the locked test set.
+TARGET_CLASSES = (
+    'Analysis', 'Backdoor', 'DoS', 'Exploits', 'Fuzzers', 'Generic',
+    'Normal', 'Reconnaissance', 'Shellcode', 'Worms',
+)
+
 DROP_COLS = ['id', 'label', 'stime', 'ltime', 'srcip', 'dstip']
 TARGET_COL = 'attack_cat'
 
@@ -121,7 +128,8 @@ def load_and_prepare(data_dir: str = "data/raw") -> tuple:
     )
 
     le = LabelEncoder()
-    y_multi = le.fit_transform(df[TARGET_COL])
+    le.classes_ = np.asarray(TARGET_CLASSES, dtype=object)
+    y_multi = le.transform(df[TARGET_COL])
     print(f"  Classes ({len(le.classes_)}): {list(le.classes_)}")
 
     # ------------------------------------------------------------------

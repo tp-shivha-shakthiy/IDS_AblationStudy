@@ -390,6 +390,10 @@ def build_model_ablation_rows(
         with open(config_path, 'r') as f:
             config = json.load(f)
         expected = ABLATION_PRESETS[exp]
+        if config.get('tier') != 1 or config.get('ablation_scope') != 'tier1':
+            raise ValueError(
+                f"Cannot aggregate {model_name}: '{exp}' is not a Tier 1 ablation artifact."
+            )
         if config.get('experiment') != exp or config.get('experiment_name') != exp:
             raise ValueError(
                 f"Cannot aggregate {model_name}: configuration in '{exp}' does not "
@@ -414,6 +418,20 @@ def build_model_ablation_rows(
             raise ValueError(
                 f"Cannot aggregate {model_name}: configuration for '{exp}' must use KMeansSMOTE."
             )
+        expected_metadata = {
+            'seed': 42,
+            'feature_selection_k': 15,
+            'pca_variance': 0.95,
+            'cv_folds': 5,
+            'balancer_k_neighbors': 3,
+            'balancer_rus_cap': 0,
+        }
+        for key, value in expected_metadata.items():
+            if config.get(key) != value:
+                raise ValueError(
+                    f"Cannot aggregate {model_name}: configuration for '{exp}' must use "
+                    f"{key}={value}."
+                )
 
         records.append((exp, config, tm_path, cv_path))
 

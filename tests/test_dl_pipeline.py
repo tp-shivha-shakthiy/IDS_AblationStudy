@@ -293,6 +293,7 @@ class TestExperimentConfig:
                      "timestamp", "git_commit"]:
             assert key in cfg, f"Missing key: {key}"
         assert cfg["tier"] == 2
+        assert cfg["ablation_scope"] == "excluded_tier2"
         assert cfg["dl_extra"]["epochs"] == 10
 
     def test_config_json_serializable(self):

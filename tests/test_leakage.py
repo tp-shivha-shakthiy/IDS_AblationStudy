@@ -66,6 +66,21 @@ def split_dataset(synthetic_dataset):
 # ---------------------------------------------------------------------------
 
 class TestNoPreprocessingLeakage:
+    def test_target_labels_use_fixed_vocabulary_without_fit(self):
+        import pandas as pd
+        from unittest.mock import patch
+        import src.preprocessing as preprocessing
+
+        row = [0] * 49
+        row[47] = 'normal'
+        raw = pd.DataFrame([row])
+        with patch.object(preprocessing.pd, 'read_csv', return_value=raw), \
+             patch.object(preprocessing.LabelEncoder, 'fit', side_effect=AssertionError):
+            _, y, le = preprocessing.load_and_prepare('synthetic')
+
+        assert y.shape == (4,)
+        assert le.classes_.tolist() == list(preprocessing.TARGET_CLASSES)
+
     def test_split_data_returns_correct_sizes(self, synthetic_dataset):
         """split_data must return 80/20 stratified split."""
         X, y = synthetic_dataset
