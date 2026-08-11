@@ -2,3 +2,8 @@ data/raw/*.csv
 __pycache__/
 .pytest_cache/
 *.pyc
+
+# Audit / analysis documents (not part of the deliverable)
+AUDIT.md
+ARCHITECTURE_GAP.md
+REFACTORING_REPORT.md
