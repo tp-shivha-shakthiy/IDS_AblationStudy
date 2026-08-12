@@ -18,11 +18,45 @@ Both support:
   strategy="smote"              — regular SMOTE
 """
 
+import time
 import numpy as np
 from collections import Counter
 from imblearn.over_sampling import SMOTE, KMeansSMOTE
 from imblearn.under_sampling import RandomUnderSampler
 from sklearn.cluster import MiniBatchKMeans
+
+
+def _kms_fit_resample(X, y, adj_k, random_state, stage="balancing"):
+    """
+    Run KMeansSMOTE with visible progress logging.
+
+    Prints the input class distribution before fitting (flushed immediately so
+    background runs show it is alive), then the elapsed time and resulting class
+    distribution after fitting.
+    """
+    counts_before = dict(sorted(Counter(y).items()))
+    total_before = len(y)
+    label = f"KMeansSMOTE ({stage})"
+    print(
+        f"    {label}: {total_before:,} samples | before "
+        f"-> {counts_before}", flush=True,
+    )
+    t0 = time.perf_counter()
+    kms = KMeansSMOTE(
+        cluster_balance_threshold=0.0,
+        k_neighbors=adj_k,
+        kmeans_estimator=MiniBatchKMeans(n_init='auto', random_state=random_state),
+        random_state=random_state,
+        n_jobs=1,
+    )
+    X_res, y_res = kms.fit_resample(X, y)
+    dt = time.perf_counter() - t0
+    counts_after = dict(sorted(Counter(y_res).items()))
+    print(
+        f"    {label}: done in {dt:.1f}s | after -> {counts_after}",
+        flush=True,
+    )
+    return X_res, y_res
 
 
 # ---------------------------------------------------------------------------
@@ -37,6 +71,7 @@ def balance_training_fold(
     n_clusters: int = 20,
     random_state: int = 42,
     rus_cap: int = 0,
+    stage: str = "fold",
 ) -> tuple:
     """
     Balance a single training fold.  Must receive ONLY training data.
@@ -70,14 +105,9 @@ def balance_training_fold(
         minority_count = min(Counter(y_use).values())
         adj_k = min(k_neighbors, minority_count - 1)
         adj_k = max(adj_k, 1)
-        kms = KMeansSMOTE(
-            cluster_balance_threshold=0.0,
-            k_neighbors=adj_k,
-            kmeans_estimator=MiniBatchKMeans(n_init='auto', random_state=random_state),
-            random_state=random_state,
-            n_jobs=1,
+        X_res, y_res = _kms_fit_resample(
+            X_use, y_use, adj_k, random_state, stage=stage,
         )
-        X_res, y_res = kms.fit_resample(X_use, y_use)
     else:
         minority_count = min(Counter(y_use).values())
         adj_k = min(k_neighbors, minority_count - 1)
@@ -127,6 +157,7 @@ def balance_full_train(
         n_clusters=n_clusters,
         random_state=random_state,
         rus_cap=rus_cap,
+        stage="final retrain",
     )
     print(f"    Balanced training: {X_train.shape[0]:,} -> "
           f"{X_balanced.shape[0]:,} samples")

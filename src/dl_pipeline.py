@@ -33,7 +33,6 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import joblib
-from collections import Counter
 
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.decomposition import PCA
@@ -42,12 +41,10 @@ from sklearn.model_selection import train_test_split, StratifiedKFold
 from sklearn.metrics import (accuracy_score, f1_score, precision_score,
                              recall_score, roc_auc_score, confusion_matrix,
                              ConfusionMatrixDisplay)
-from sklearn.cluster import MiniBatchKMeans
-from imblearn.over_sampling import SMOTE, KMeansSMOTE
-from imblearn.under_sampling import RandomUnderSampler
 
 from src.feature_selection import fit_mi_selector
 from src.preprocessing import fit_categorical_encoder, transform_features
+from src.balancing import balance_training_fold
 from src.experiment_config import save_experiment_config
 
 import matplotlib
@@ -190,23 +187,16 @@ def preprocess_fold(
 
     # 4. Balancing (fold train only, never touch val)
     if use_balancing:
-        X_use, y_use = X_tr, y_tr
-        if rus_cap > 0:
-            class_counts = Counter(y_use)
-            under_strategy = {c: min(cnt, rus_cap) for c, cnt in class_counts.items()}
-            rus = RandomUnderSampler(sampling_strategy=under_strategy, random_state=random_state)
-            X_use, y_use = rus.fit_resample(X_use, y_use)
-
-        minority_count = min(Counter(y_use).values())
-        adj_k = max(min(k_neighbors, minority_count - 1), 1)
-        kms = KMeansSMOTE(
-            cluster_balance_threshold=0.0,
-            k_neighbors=adj_k,
-            kmeans_estimator=MiniBatchKMeans(n_init='auto', random_state=random_state),
-            random_state=random_state, n_jobs=1,
+        X_tr, y_tr = balance_training_fold(
+            X_tr, y_tr,
+            strategy="kmeans",
+            k_neighbors=k_neighbors,
+            n_clusters=n_clusters,
+            random_state=random_state,
+            rus_cap=rus_cap,
+            stage="fold",
         )
-        X_tr, y_tr = kms.fit_resample(X_use, y_use)
-        del X_use, y_use; gc.collect()
+        gc.collect()
 
     return {
         'X_tr': X_tr, 'y_tr': y_tr,
@@ -285,23 +275,16 @@ def preprocess_final(
 
     # 4. Balancing (full training only, never touch test)
     if use_balancing:
-        X_use, y_use = X_train, y_train
-        if rus_cap > 0:
-            class_counts = Counter(y_use)
-            under_strategy = {c: min(cnt, rus_cap) for c, cnt in class_counts.items()}
-            rus = RandomUnderSampler(sampling_strategy=under_strategy, random_state=random_state)
-            X_use, y_use = rus.fit_resample(X_use, y_use)
-
-        minority_count = min(Counter(y_use).values())
-        adj_k = max(min(k_neighbors, minority_count - 1), 1)
-        kms = KMeansSMOTE(
-            cluster_balance_threshold=0.0,
-            k_neighbors=adj_k,
-            kmeans_estimator=MiniBatchKMeans(n_init='auto', random_state=random_state),
-            random_state=random_state, n_jobs=1,
+        X_train, y_train = balance_training_fold(
+            X_train, y_train,
+            strategy="kmeans",
+            k_neighbors=k_neighbors,
+            n_clusters=n_clusters,
+            random_state=random_state,
+            rus_cap=rus_cap,
+            stage="final retrain",
         )
-        X_train, y_train = kms.fit_resample(X_use, y_use)
-        del X_use, y_use; gc.collect()
+        gc.collect()
 
     print(f"  Final train: {X_train.shape} | Test: {X_test.shape}")
 
