@@ -49,6 +49,7 @@ def build_experiment_config(
     tier: int = 1,
     dl_extra: dict = None,
     rus_cap: int = 0,
+    ablation_scope: str = None,
 ) -> dict:
     """
     Build an experiment configuration dict with a unified schema.
@@ -68,15 +69,21 @@ def build_experiment_config(
     test_size     : float holdout fraction
     tier          : int   1 or 2
     dl_extra      : dict  DL-specific fields (architecture, epochs, lr, etc.)
+    rus_cap       : int   per-class undersampling cap (0 = no undersampling)
+    ablation_scope: str   override the default ablation scope.  Defaults to
+                          'tier1' for tier 1 and 'excluded_tier2' for tier 2.
+                          DL ablation runs pass ablation_scope='tier2'.
 
     Returns
     -------
     dict ready for JSON serialization
     """
+    if ablation_scope is None:
+        ablation_scope = "tier1" if tier == 1 else "excluded_tier2"
     config = {
         "model": model_name,
         "tier": tier,
-        "ablation_scope": "tier1" if tier == 1 else "excluded_tier2",
+        "ablation_scope": ablation_scope,
         "seed": random_state,
         "train_test_split": f"{int((1 - test_size) * 100)}/{int(test_size * 100)}",
         "test_size": test_size,

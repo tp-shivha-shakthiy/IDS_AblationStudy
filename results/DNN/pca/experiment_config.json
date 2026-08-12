@@ -1,0 +1,61 @@
+{
+  "model": "DNN",
+  "tier": 2,
+  "ablation_scope": "tier2",
+  "seed": 42,
+  "train_test_split": "80/20",
+  "test_size": 0.2,
+  "cv_folds": 5,
+  "balancer": "kmeans",
+  "balancer_k_neighbors": 3,
+  "balancer_rus_cap": 0,
+  "experiment": "pca",
+  "experiment_name": "pca",
+  "preprocessing_mode": "pca",
+  "use_mi": false,
+  "use_pca": true,
+  "use_balancing": false,
+  "feature_selection": "mutual_information",
+  "feature_selection_scope": "per_fold_training_data",
+  "feature_selection_k": 15,
+  "scaler": "StandardScaler",
+  "scaler_scope": "per_fold_training_data",
+  "test_set_locked": true,
+  "final_retrain": "full_80_percent_training_set",
+  "timestamp": "2026-08-11T22:45:00.700270",
+  "git_commit": "f5cad98493f4cefe6ecf0528d0edf45cb31ebcb5",
+  "pca_variance": 0.95,
+  "pca_scope": "per_fold_training_data",
+  "model_hyperparameters": {
+    "layers": [
+      64,
+      32
+    ],
+    "dropout": 0.1,
+    "lr": 0.01,
+    "weight_decay": 0.0001,
+    "epochs": 5,
+    "batch_size": 1024
+  },
+  "dl_extra": {
+    "preprocessing": [
+      "StandardScaler"
+    ],
+    "balance_strategy": "class_weights"
+  },
+  "model_name": "DNN",
+  "class_names": [
+    "Analysis",
+    "Backdoor",
+    "DoS",
+    "Exploits",
+    "Fuzzers",
+    "Generic",
+    "Normal",
+    "Reconnaissance",
+    "Shellcode",
+    "Worms"
+  ],
+  "normal_class_idx": 6,
+  "num_classes": 10
+}

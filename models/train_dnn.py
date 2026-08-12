@@ -1,10 +1,12 @@
 """
 train_dnn.py
 ============
-Deep Neural Network — Baseline (no MI/PCA/balancing, class-weight loss)
+Deep Neural Network — participates in the seven-preset ablation.
 
-Uses shared infrastructure from src/dl_pipeline.py.
-Architecture preserved: 2 hidden layers (64→32), BatchNorm, Dropout(0.1).
+Architecture preserved: 2 hidden layers (64→32), BatchNorm, Dropout(0.1),
+class-weight loss.  The MI / PCA / KMeansSMOTE preprocessing is driven by
+the ``--experiment`` ablation preset (identical hyperparameters to Tier 1:
+MI k=15, PCA 0.95 variance, KMeansSMOTE k_neighbors=3, no undersampling).
 """
 
 import sys
@@ -30,7 +32,7 @@ from src.dl_pipeline import (
     compute_class_weights, evaluate_with_proba, get_probabilities,
     save_dl_artifacts, preprocess_fold, preprocess_final,
 )
-from src.experiment_config import build_experiment_config
+from src.experiment_config import build_experiment_config, resolve_experiment
 
 set_seeds(42)
 device = get_device()
@@ -63,7 +65,11 @@ class DeepNeuralNetwork(nn.Module):
 # Pipeline
 # ======================================================================
 
-def main(data_dir="data/raw"):
+def main(data_dir="data/raw", experiment="mi_pca_balancing"):
+    flags = resolve_experiment(experiment)
+    use_mi, use_pca, use_balancing = (
+        flags["use_mi"], flags["use_pca"], flags["use_balancing"],
+    )
     data = load_data(data_dir)
     X_train, X_test = data['X_train'], data['X_test']
     y_train, y_test = data['y_train'], data['y_test']
@@ -71,9 +77,13 @@ def main(data_dir="data/raw"):
     normal_class_idx = data['normal_class_idx']
     class_names = data['class_names']
 
-    # --- Per-fold CV (Scaler only, no MI/PCA/balancing for this model) ---
+    # --- Per-fold CV (preprocessing driven by the ablation preset) ---
     print(f"\n{'='*60}")
-    print(f"  {MODEL_NAME} - Baseline DNN (class-weight loss)")
+    print(f"  {MODEL_NAME} - DNN (class-weight loss)")
+    print(f"  Experiment: {experiment}  "
+          f"(MI={'on' if use_mi else 'off'}, "
+          f"PCA={'on' if use_pca else 'off'}, "
+          f"KMeansSMOTE={'on' if use_balancing else 'off'})")
     print(f"{'='*60}")
     print(f"\n  Cross-Validation (5 folds)")
 
@@ -87,13 +97,16 @@ def main(data_dir="data/raw"):
 
         fold_data = preprocess_fold(
             X_tr, y_tr, X_val, y_val,
-            use_mi=False, use_pca=False, use_balancing=False,
+            mi_k=15, pca_variance=0.95,
+            n_clusters=20, k_neighbors=3, rus_cap=0,
+            use_mi=use_mi, use_pca=use_pca, use_balancing=use_balancing,
         )
         X_tr_s, X_val_s = fold_data['X_tr'], fold_data['X_val']
-        fold_weights = compute_class_weights(y_tr, device)
+        y_tr_bal = fold_data['y_tr']
+        fold_weights = compute_class_weights(y_tr_bal, device)
 
         X_tr_t = torch.tensor(X_tr_s, dtype=torch.float32)
-        y_tr_t = torch.tensor(y_tr, dtype=torch.long)
+        y_tr_t = torch.tensor(y_tr_bal, dtype=torch.long)
         X_val_t = torch.tensor(X_val_s, dtype=torch.float32)
 
         train_loader = DataLoader(
@@ -128,7 +141,9 @@ def main(data_dir="data/raw"):
     print(f"\n  === Final Retrain ===")
     final_data = preprocess_final(
         X_train, y_train, X_test, y_test,
-        use_mi=False, use_pca=False, use_balancing=False,
+        mi_k=15, pca_variance=0.95,
+        n_clusters=20, k_neighbors=3, rus_cap=0,
+        use_mi=use_mi, use_pca=use_pca, use_balancing=use_balancing,
     )
     X_train_s, X_test_s = final_data['X_train'], final_data['X_test']
     final_weights = compute_class_weights(final_data['y_train'], device)
@@ -173,6 +188,7 @@ def main(data_dir="data/raw"):
         final_model, MODEL_NAME,
         cv_metrics=cv_metrics,
         test_metrics=test_metrics,
+        experiment=experiment,
         class_names=class_names,
         normal_class_idx=normal_class_idx,
         y_test=y_test, y_test_pred=test_preds,
@@ -183,7 +199,13 @@ def main(data_dir="data/raw"):
             model_params={"layers": [64, 32], "dropout": 0.1,
                           "lr": 0.01, "weight_decay": 1e-4,
                           "epochs": 5, "batch_size": 1024},
-            mi_k=0, pca_variance=None, tier=2,
+            experiment_name=experiment,
+            preprocessing_mode=experiment,
+            use_mi=use_mi, use_pca=use_pca, use_balancing=use_balancing,
+            mi_k=15, pca_variance=0.95,
+            n_splits=5, balancer="kmeans",
+            k_neighbors=3, rus_cap=0,
+            tier=2, ablation_scope="tier2",
             dl_extra={"preprocessing": ["StandardScaler"],
                       "balance_strategy": "class_weights"},
         ),
@@ -194,7 +216,14 @@ def main(data_dir="data/raw"):
 
 if __name__ == "__main__":
     import argparse
+    from src.experiment_config import ABLATION_PRESETS
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-dir", default="data/raw")
+    parser.add_argument(
+        "--experiment", choices=list(ABLATION_PRESETS.keys()),
+        default="mi_pca_balancing",
+        help="Ablation preset (default: mi_pca_balancing). "
+             "Use 'raw' for the scaler-only baseline.",
+    )
     args = parser.parse_args()
-    main(data_dir=args.data_dir)
+    main(data_dir=args.data_dir, experiment=args.experiment)

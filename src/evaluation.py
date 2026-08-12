@@ -390,9 +390,11 @@ def build_model_ablation_rows(
         with open(config_path, 'r') as f:
             config = json.load(f)
         expected = ABLATION_PRESETS[exp]
-        if config.get('tier') != 1 or config.get('ablation_scope') != 'tier1':
+        if config.get('tier') not in (1, 2) or \
+                config.get('ablation_scope') not in ('tier1', 'tier2'):
             raise ValueError(
-                f"Cannot aggregate {model_name}: '{exp}' is not a Tier 1 ablation artifact."
+                f"Cannot aggregate {model_name}: '{exp}' is not a Tier 1 or "
+                "Tier 2 ablation artifact."
             )
         if config.get('experiment') != exp or config.get('experiment_name') != exp:
             raise ValueError(

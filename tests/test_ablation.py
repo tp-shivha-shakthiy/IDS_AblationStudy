@@ -404,6 +404,48 @@ class TestAblationTables:
         with pytest.raises(ValueError, match="cv_folds=5"):
             build_model_ablation_rows("HGB", str(tmp_path))
 
+    def test_build_rows_accepts_tier2_ablation_scope(self, tmp_path):
+        """DL models with ablation_scope='tier2' must aggregate into 7 rows."""
+        model = "DNN"
+        for exp in ABLATION_ORDER:
+            exp_dir = os.path.join(str(tmp_path), model, exp)
+            os.makedirs(exp_dir, exist_ok=True)
+            with open(os.path.join(exp_dir, "test_metrics.json"), 'w') as f:
+                json.dump({"accuracy": 0.9, "f1": 0.88, "auc": 0.95}, f)
+            pd.DataFrame([
+                {"accuracy": 0.9, "precision": 0.88, "recall": 0.87,
+                 "f1": 0.88, "auc": 0.95},
+            ]).to_csv(os.path.join(exp_dir, "cv_metrics.csv"), index=False)
+            with open(os.path.join(exp_dir, "experiment_config.json"), 'w') as f:
+                json.dump({
+                    "experiment": exp, "experiment_name": exp,
+                    "tier": 2, "ablation_scope": "tier2",
+                    **ABLATION_PRESETS[exp], "seed": 42,
+                    "feature_selection_k": 15, "pca_variance": 0.95,
+                    "balancer": "kmeans", "cv_folds": 5,
+                    "balancer_k_neighbors": 3, "balancer_rus_cap": 0,
+                }, f)
+            open(os.path.join(exp_dir, "dnn_model.joblib"), 'wb').close()
+
+        summary_rows, cv_rows = build_model_ablation_rows(model, str(tmp_path))
+        assert len(summary_rows) == 7
+        assert len(cv_rows) == 7
+        assert summary_rows[0]["Preprocessing"] == "Raw"
+        assert summary_rows[6]["Preprocessing"] == "MI+PCA+KMeansSMOTE"
+
+    def test_build_rows_rejects_excluded_tier2(self, tmp_path):
+        """Non-ablation tier-2 artifacts must still be rejected."""
+        self._fabricate_experiments(str(tmp_path))
+        path = os.path.join(str(tmp_path), "HGB", "raw", "experiment_config.json")
+        with open(path) as f:
+            config = json.load(f)
+        config["ablation_scope"] = "excluded_tier2"
+        with open(path, 'w') as f:
+            json.dump(config, f)
+
+        with pytest.raises(ValueError, match="not a Tier 1 or Tier 2"):
+            build_model_ablation_rows("HGB", str(tmp_path))
+
     def test_synthetic_seven_experiment_kmeans_run_aggregates(self, split_dataset, tmp_path, monkeypatch):
         from src.model_training import train_and_evaluate
         from src.evaluation import save_model_ablation_tables

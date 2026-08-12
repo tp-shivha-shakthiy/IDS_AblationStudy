@@ -16,8 +16,12 @@ Provides:
 All DL model scripts should import from this module instead of
 duplicating preprocessing, MI, PCA, balancing, or evaluation code.
 
-Tier 2 models are explicitly excluded from the faculty Tier 1 seven-preset
-ablation.  Their configurations record ``ablation_scope=excluded_tier2``.
+Tier 2 models run the SAME seven-preset ablation as Tier 1
+(raw, mi, mi_balancing, pca, pca_balancing, mi_pca, mi_pca_balancing)
+with identical preprocessing hyperparameters (MI k=15, PCA 0.95 variance,
+KMeansSMOTE k_neighbors=3, no undersampling).  Their configurations record
+``ablation_scope=tier2`` so they can be aggregated into the same comparison
+tables as the classical Tier 1 models.
 """
 
 import os
@@ -44,13 +48,14 @@ from imblearn.under_sampling import RandomUnderSampler
 
 from src.feature_selection import fit_mi_selector
 from src.preprocessing import fit_categorical_encoder, transform_features
+from src.experiment_config import save_experiment_config
 
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 
-TIER2_ABLATION_SCOPE = "excluded_tier2"
+TIER2_ABLATION_SCOPE = "tier2"
 
 
 # ---------------------------------------------------------------------------
@@ -121,11 +126,12 @@ def preprocess_fold(
     y_tr: np.ndarray,
     X_val: np.ndarray,
     y_val: np.ndarray,
-    mi_k: int = 30,
-    pca_components: int = 15,
+    mi_k: int = 15,
+    pca_variance: float = None,
+    pca_components: int = None,
     n_clusters: int = 20,
-    k_neighbors: int = 2,
-    rus_cap: int = 15000,
+    k_neighbors: int = 3,
+    rus_cap: int = 0,
     random_state: int = 42,
     use_mi: bool = True,
     use_pca: bool = True,
@@ -136,6 +142,12 @@ def preprocess_fold(
 
     All transformers are fit on (X_tr, y_tr) only.
     (X_val, y_val) is never fitted — only transformed.
+
+    Mirrors the Tier 1 pipeline (src/cross_validation.py + src/balancing.py):
+      - PCA supports either a target number of components (``pca_components``)
+        or a cumulative-variance fraction (``pca_variance``, Tier 1 semantics).
+      - Random undersampling is only applied when ``rus_cap > 0``; otherwise
+        KMeansSMOTE oversamples the minority classes directly.
 
     Returns
     -------
@@ -164,28 +176,37 @@ def preprocess_fold(
     X_val = scaler.transform(X_val)
 
     # 3. PCA (fit on fold train only)
-    if use_pca and pca_components > 0:
-        n_comp = min(pca_components, X_tr.shape[1], X_tr.shape[0])
-        pca = PCA(n_components=n_comp, random_state=random_state)
+    if use_pca and (
+        pca_variance is not None
+        or (pca_components is not None and pca_components > 0)
+    ):
+        if pca_components is not None and pca_components > 0:
+            n_comp = min(pca_components, X_tr.shape[1], X_tr.shape[0])
+            pca = PCA(n_components=n_comp, random_state=random_state)
+        else:
+            pca = PCA(n_components=pca_variance, random_state=random_state)
         X_tr = pca.fit_transform(X_tr)
         X_val = pca.transform(X_val)
 
     # 4. Balancing (fold train only, never touch val)
     if use_balancing:
-        class_counts = Counter(y_tr)
-        under_strategy = {c: min(cnt, rus_cap) for c, cnt in class_counts.items()}
-        rus = RandomUnderSampler(sampling_strategy=under_strategy, random_state=random_state)
-        X_tr_rus, y_tr_rus = rus.fit_resample(X_tr, y_tr)
+        X_use, y_use = X_tr, y_tr
+        if rus_cap > 0:
+            class_counts = Counter(y_use)
+            under_strategy = {c: min(cnt, rus_cap) for c, cnt in class_counts.items()}
+            rus = RandomUnderSampler(sampling_strategy=under_strategy, random_state=random_state)
+            X_use, y_use = rus.fit_resample(X_use, y_use)
 
-        actual_k = min(k_neighbors, min(Counter(y_tr_rus).values()) - 1)
+        minority_count = min(Counter(y_use).values())
+        adj_k = max(min(k_neighbors, minority_count - 1), 1)
         kms = KMeansSMOTE(
             cluster_balance_threshold=0.0,
-            k_neighbors=max(actual_k, 1),
+            k_neighbors=adj_k,
             kmeans_estimator=MiniBatchKMeans(n_init='auto', random_state=random_state),
             random_state=random_state, n_jobs=1,
         )
-        X_tr, y_tr = kms.fit_resample(X_tr_rus, y_tr_rus)
-        del X_tr_rus, y_tr_rus, rus, kms; gc.collect()
+        X_tr, y_tr = kms.fit_resample(X_use, y_use)
+        del X_use, y_use; gc.collect()
 
     return {
         'X_tr': X_tr, 'y_tr': y_tr,
@@ -204,11 +225,12 @@ def preprocess_final(
     y_train: np.ndarray,
     X_test: np.ndarray,
     y_test: np.ndarray,
-    mi_k: int = 30,
-    pca_components: int = 15,
+    mi_k: int = 15,
+    pca_variance: float = None,
+    pca_components: int = None,
     n_clusters: int = 20,
-    k_neighbors: int = 2,
-    rus_cap: int = 15000,
+    k_neighbors: int = 3,
+    rus_cap: int = 0,
     random_state: int = 42,
     use_mi: bool = True,
     use_pca: bool = True,
@@ -217,6 +239,10 @@ def preprocess_final(
     """
     Full-train preprocessing for final model retraining.
     Test data is NEVER fitted — only transformed.
+
+    Mirrors the Tier 1 final-retrain path (src/model_training.py): PCA uses
+    cumulative variance by default, and balancing skips undersampling when
+    ``rus_cap == 0``.
 
     Returns
     -------
@@ -245,28 +271,37 @@ def preprocess_final(
     X_test = scaler.transform(X_test)
 
     # 3. PCA (fit on full training only)
-    if use_pca and pca_components > 0:
-        n_comp = min(pca_components, X_train.shape[1], X_train.shape[0])
-        pca = PCA(n_components=n_comp, random_state=random_state)
+    if use_pca and (
+        pca_variance is not None
+        or (pca_components is not None and pca_components > 0)
+    ):
+        if pca_components is not None and pca_components > 0:
+            n_comp = min(pca_components, X_train.shape[1], X_train.shape[0])
+            pca = PCA(n_components=n_comp, random_state=random_state)
+        else:
+            pca = PCA(n_components=pca_variance, random_state=random_state)
         X_train = pca.fit_transform(X_train)
         X_test = pca.transform(X_test)
 
     # 4. Balancing (full training only, never touch test)
     if use_balancing:
-        class_counts = Counter(y_train)
-        under_strategy = {c: min(cnt, rus_cap) for c, cnt in class_counts.items()}
-        rus = RandomUnderSampler(sampling_strategy=under_strategy, random_state=random_state)
-        X_tr_rus, y_tr_rus = rus.fit_resample(X_train, y_train)
+        X_use, y_use = X_train, y_train
+        if rus_cap > 0:
+            class_counts = Counter(y_use)
+            under_strategy = {c: min(cnt, rus_cap) for c, cnt in class_counts.items()}
+            rus = RandomUnderSampler(sampling_strategy=under_strategy, random_state=random_state)
+            X_use, y_use = rus.fit_resample(X_use, y_use)
 
-        actual_k = min(k_neighbors, min(Counter(y_tr_rus).values()) - 1)
+        minority_count = min(Counter(y_use).values())
+        adj_k = max(min(k_neighbors, minority_count - 1), 1)
         kms = KMeansSMOTE(
             cluster_balance_threshold=0.0,
-            k_neighbors=max(actual_k, 1),
+            k_neighbors=adj_k,
             kmeans_estimator=MiniBatchKMeans(n_init='auto', random_state=random_state),
             random_state=random_state, n_jobs=1,
         )
-        X_train, y_train = kms.fit_resample(X_tr_rus, y_tr_rus)
-        del X_tr_rus, y_tr_rus, rus, kms; gc.collect()
+        X_train, y_train = kms.fit_resample(X_use, y_use)
+        del X_use, y_use; gc.collect()
 
     print(f"  Final train: {X_train.shape} | Test: {X_test.shape}")
 
@@ -305,7 +340,7 @@ def evaluate_predictions(
 
     Returns dict with:
         binary_acc, binary_f1, multi_acc, macro_f1, weighted_f1,
-        precision, recall, auc
+        precision, recall, auc, accuracy, f1, binary_auc
     """
     y_true_bin = (y_true != normal_class_idx).astype(int)
     y_pred_bin = (y_pred != normal_class_idx).astype(int)
@@ -314,8 +349,10 @@ def evaluate_predictions(
         'binary_acc': accuracy_score(y_true_bin, y_pred_bin),
         'binary_f1': f1_score(y_true_bin, y_pred_bin, average='binary', zero_division=0),
         'multi_acc': accuracy_score(y_true, y_pred),
+        'accuracy': accuracy_score(y_true, y_pred),
         'macro_f1': f1_score(y_true, y_pred, average='macro', zero_division=0),
         'weighted_f1': f1_score(y_true, y_pred, average='weighted', zero_division=0),
+        'f1': f1_score(y_true, y_pred, average='weighted', zero_division=0),
         'precision': precision_score(y_true, y_pred, average='weighted', zero_division=0),
         'recall': recall_score(y_true, y_pred, average='weighted', zero_division=0),
     }
@@ -330,6 +367,8 @@ def evaluate_predictions(
             metrics['auc'] = 0.0
     except Exception:
         metrics['auc'] = 0.0
+    # AUC keys are only computable with probabilities; argmax-only callers get 0.0
+    metrics['binary_auc'] = 0.0
     return metrics
 
 
@@ -348,6 +387,12 @@ def evaluate_with_proba(
         metrics['auc'] = roc_auc_score(y_bin, y_proba, multi_class='ovr', average='weighted')
     except Exception:
         metrics['auc'] = 0.0
+    try:
+        y_true_bin = (y_true != normal_class_idx).astype(int)
+        p_attack = 1.0 - np.asarray(y_proba)[:, normal_class_idx]
+        metrics['binary_auc'] = roc_auc_score(y_true_bin, p_attack)
+    except Exception:
+        metrics['binary_auc'] = 0.0
     return metrics
 
 
@@ -382,7 +427,8 @@ def save_dl_artifacts(
     model_name: str,
     cv_metrics: list,
     test_metrics: dict = None,
-    save_dir: str = None,
+    experiment: str = None,
+    save_root: str = "results",
     class_names: list = None,
     normal_class_idx: int = 0,
     y_test: np.ndarray = None,
@@ -397,13 +443,29 @@ def save_dl_artifacts(
     Save model weights, metrics CSV, metrics JSON, confusion matrix,
     preprocessing artifacts (MI, Scaler, PCA, LabelEncoder), and config.json.
 
+    When *experiment* is given the artifacts are written to the canonical
+    Tier 1 ablation layout::
+
+        results/<Model>/<experiment>/experiment_config.json
+        results/<Model>/<experiment>/test_metrics.json
+        results/<Model>/<experiment>/cv_metrics.csv
+        results/<Model>/<experiment>/<model>_model.joblib
+        results/<Model>/<experiment>/<model>_model.pt
+        results/<Model>/<experiment>/<model>_confusion_matrix.png
+        results/<Model>/<experiment>/{mi_selector,scaler,pca,label_encoder}.joblib
+
+    so the DL model can be aggregated into the same ablation tables as the
+    classical Tier 1 models.  Without *experiment* it falls back to the
+    legacy ``models/artifacts/<model_name>/`` location.
+
     Parameters
     ----------
     model            : trained nn.Module
     model_name       : str  (used for file naming)
     cv_metrics       : list of per-fold metric dicts
     test_metrics     : dict  (final test metrics)
-    save_dir         : str   (defaults to models/artifacts/<model_name>)
+    experiment       : str   ablation preset name (None = legacy location)
+    save_root        : str   parent of the results/<Model>/<experiment> layout
     class_names      : list  (for confusion matrix labels)
     normal_class_idx : int
     y_test           : ground-truth labels  (for confusion matrix)
@@ -414,25 +476,32 @@ def save_dl_artifacts(
     le               : fitted LabelEncoder
     config           : dict of all experiment hyper-parameters
     """
-    if save_dir is None:
+    if experiment is not None:
+        save_dir = os.path.join(save_root, model_name, experiment)
+    else:
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         save_dir = os.path.join(project_root, "models", "artifacts", model_name)
     os.makedirs(save_dir, exist_ok=True)
 
-    # Model weights
-    model_path = os.path.join(save_dir, f"{model_name.lower()}_model.pt")
-    torch.save(model.state_dict(), model_path)
+    # Model weights (.pt) + full model object (.joblib, canonical ablation
+    # artifact name that mirrors Tier 1's <model>_model.joblib).
+    model_pt = os.path.join(save_dir, f"{model_name.lower()}_model.pt")
+    torch.save(model.state_dict(), model_pt)
+    print(f"  Model weights saved -> {model_pt}")
+
+    model_path = os.path.join(save_dir, f"{model_name.lower()}_model.joblib")
+    joblib.dump(model, model_path)
     print(f"  Model saved -> {model_path}")
 
-    # CV metrics CSV
+    # CV metrics CSV (canonical name, columns compatible with the ablator)
     cv_df = pd.DataFrame(cv_metrics)
-    cv_path = os.path.join(save_dir, f"{model_name.lower()}_cv_metrics.csv")
+    cv_path = os.path.join(save_dir, "cv_metrics.csv")
     cv_df.to_csv(cv_path, index=False, float_format='%.4f')
     print(f"  CV metrics saved -> {cv_path}")
 
-    # Test metrics JSON
+    # Test metrics JSON (canonical name)
     if test_metrics:
-        json_path = os.path.join(save_dir, f"{model_name.lower()}_test_metrics.json")
+        json_path = os.path.join(save_dir, "test_metrics.json")
         with open(json_path, 'w') as f:
             json.dump(test_metrics, f, indent=2)
         print(f"  Test metrics saved -> {json_path}")
@@ -460,16 +529,13 @@ def save_dl_artifacts(
     if le is not None:
         joblib.dump(le, os.path.join(save_dir, "label_encoder.joblib"))
 
-    # Config JSON
+    # Config JSON (canonical name, written via the shared config writer)
     if config is None:
         config = {}
     config.setdefault("model_name", model_name)
     config.setdefault("class_names", class_names)
     config.setdefault("normal_class_idx", normal_class_idx)
     config.setdefault("num_classes", len(class_names) if class_names else None)
-    config_path = os.path.join(save_dir, "config.json")
-    with open(config_path, 'w') as f:
-        json.dump(config, f, indent=2)
-    print(f"  Config saved -> {config_path}")
+    save_experiment_config(config, save_dir)
 
     return save_dir

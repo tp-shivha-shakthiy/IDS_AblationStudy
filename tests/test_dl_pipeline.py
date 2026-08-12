@@ -358,3 +358,105 @@ class TestIntegration:
         )
         assert 0.0 <= test_m['accuracy'] <= 1.0
         assert len(y_pred) == len(y_test)
+
+
+# ---------------------------------------------------------------------------
+# 7. Tier 1 parity — DL preprocessing & artifacts for the ablation
+# ---------------------------------------------------------------------------
+
+class TestDLTier1Parity:
+    def test_preprocess_fold_pca_variance_mode(self, split_data):
+        """preprocess_fold must support Tier 1 PCA cumulative-variance mode."""
+        from src.dl_pipeline import preprocess_fold
+
+        X_train, X_test, y_train, y_test = split_data
+        result = preprocess_fold(
+            X_train, y_train, X_test, y_test,
+            mi_k=0, pca_variance=0.95,
+            use_balancing=False,
+        )
+        assert result['pca'] is not None
+        assert 0 < result['X_tr'].shape[1] <= 15
+        assert result['X_val'].shape[1] == result['X_tr'].shape[1]
+
+    def test_preprocess_fold_balancing_with_rus_cap_zero(self, split_data):
+        """Balancing must not crash when rus_cap == 0 (no undersampling)."""
+        from src.dl_pipeline import preprocess_fold
+
+        X_train, X_test, y_train, y_test = split_data
+        result = preprocess_fold(
+            X_train, y_train, X_test, y_test,
+            mi_k=0, pca_components=0,
+            k_neighbors=2, rus_cap=0,
+            use_balancing=True,
+        )
+        assert result['X_val'].shape[0] == len(y_test)
+        assert result['X_tr'].shape[0] >= len(y_train)
+
+    def test_preprocess_fold_matches_tier1_hyperparameters(self, split_data):
+        """Default MI k, PCA variance, k_neighbors, rus_cap must match Tier 1."""
+        from src.dl_pipeline import preprocess_fold
+        import inspect
+
+        params = inspect.signature(preprocess_fold).parameters
+        assert params['mi_k'].default == 15
+        assert params['k_neighbors'].default == 3
+        assert params['rus_cap'].default == 0
+
+    def test_save_dl_artifacts_writes_ablation_layout(self, tmp_path):
+        """save_dl_artifacts with experiment must write the Tier 1 layout."""
+        from src.dl_pipeline import save_dl_artifacts
+
+        model = torch.nn.Linear(4, 3)
+        cv_metrics = [
+            {"accuracy": 0.8, "precision": 0.8, "recall": 0.8,
+             "f1": 0.8, "auc": 0.9},
+        ]
+        test_metrics = {"accuracy": 0.8, "auc": 0.9}
+        save_dl_artifacts(
+            model, "DNN",
+            cv_metrics=cv_metrics,
+            test_metrics=test_metrics,
+            experiment="mi_pca_balancing",
+            save_root=str(tmp_path),
+            class_names=["Normal", "Attack", "Other"],
+            y_test=np.array([0, 1, 2, 0]),
+            y_test_pred=np.array([0, 1, 1, 0]),
+            config={"tier": 2, "experiment": "mi_pca_balancing"},
+        )
+
+        exp_dir = os.path.join(str(tmp_path), "DNN", "mi_pca_balancing")
+        for name in ["experiment_config.json", "test_metrics.json",
+                     "cv_metrics.csv", "dnn_model.joblib", "dnn_model.pt"]:
+            assert os.path.isfile(os.path.join(exp_dir, name)), f"Missing {name}"
+
+    def test_evaluate_with_proba_tier1_compatible_keys(self):
+        """evaluate_with_proba must expose accuracy/f1/binary_auc keys."""
+        from src.dl_pipeline import evaluate_with_proba
+
+        rng = np.random.RandomState(42)
+        y_true = np.array([0, 1, 2, 0, 1, 2, 0, 1])
+        y_proba = rng.dirichlet(np.ones(3), size=8)
+        y_pred = np.argmax(y_proba, axis=1)
+
+        m = evaluate_with_proba(y_true, y_pred, y_proba)
+        for key in ["accuracy", "f1", "binary_auc", "multi_acc",
+                    "weighted_f1", "auc", "precision", "recall"]:
+            assert key in m, f"Missing key: {key}"
+
+
+class TestExperimentConfigScope:
+    def test_tier2_ablation_scope_override(self):
+        """ablation_scope='tier2' must override the tier-2 default."""
+        from src.experiment_config import build_experiment_config
+
+        cfg = build_experiment_config(model_name="DNN", tier=2,
+                                      ablation_scope="tier2")
+        assert cfg["ablation_scope"] == "tier2"
+        assert cfg["tier"] == 2
+
+        cfg_default = build_experiment_config(model_name="DNN", tier=2)
+        assert cfg_default["ablation_scope"] == "excluded_tier2"
+
+        cfg_tier1 = build_experiment_config(model_name="HGB", tier=1)
+        assert cfg_tier1["ablation_scope"] == "tier1"

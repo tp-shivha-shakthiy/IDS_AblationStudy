@@ -151,7 +151,10 @@ def load_and_prepare(data_dir: str = "data/raw") -> tuple:
 
 def fit_categorical_encoder(X_train: pd.DataFrame):
     """Fit an unknown-safe categorical encoder on training features only."""
-    cat_cols = X_train.select_dtypes(include=['object']).columns.tolist()
+    # pandas 3.x stores strings as 'str' (StringDtype) or legacy 'object'.
+    cat_cols = X_train.select_dtypes(
+        include=['object', 'string']
+    ).columns.tolist()
     if not cat_cols:
         return None
 
@@ -168,9 +171,15 @@ def transform_features(X: pd.DataFrame, categorical_encoder) -> np.ndarray:
     X_out = X.copy()
     if categorical_encoder is not None:
         cat_cols = list(categorical_encoder.feature_names_in_)
-        X_out.loc[:, cat_cols] = categorical_encoder.transform(
-            X_out[cat_cols].astype(str)
+        encoded = categorical_encoder.transform(X_out[cat_cols].astype(str))
+        # Replace the categorical columns wholesale with the encoder's numeric
+        # output instead of assigning floats into str/StringDtype columns.
+        enc_block = pd.DataFrame(
+            encoded, index=X_out.index, columns=cat_cols,
         )
+        X_out = pd.concat(
+            [X_out.drop(columns=cat_cols), enc_block], axis=1,
+        )[X_out.columns]
 
     X_out = X_out.apply(pd.to_numeric, errors='coerce')
     return (

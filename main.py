@@ -29,6 +29,14 @@ Usage
    python main.py --aggregate-ablation    # validate and build final 7-row tables
    python main.py --quick 200000          # verify pipeline on a stratified sample
   python main.py --skip-plots            # skip matplotlib output
+
+The DL models (Tier 2) run the same seven ablation presets through their
+own trainers and write into the same results/<Model>/<experiment>/ layout:
+  python models/train_dnn.py --experiment raw
+  python models/train_lstm.py --experiment mi_pca_balancing   # etc.
+Once all experiments for every model exist, --aggregate-ablation emits the
+comparison tables for HGB, XGBoost, LogReg, DNN, LSTM, BiLSTM,
+BiLSTM_SharedFE, and DNN_MI_PCA_KMeans.
 """
 
 import argparse
@@ -108,7 +116,10 @@ def main():
     args = parse_args()
 
     if args.aggregate_ablation:
-        model_names = ('HGB', 'XGBoost', 'LogReg')
+        model_names = (
+            'HGB', 'XGBoost', 'LogReg',
+            'DNN', 'LSTM', 'BiLSTM', 'BiLSTM_SharedFE', 'DNN_MI_PCA_KMeans',
+        )
         # Validate every model before writing any table for this aggregation run.
         for name in model_names:
             build_model_ablation_rows(name, experiments_root="results")

@@ -1,10 +1,12 @@
 """
 train_LSTM.py
 =============
-Bidirectional LSTM with MI + PCA + KMeansSMOTE.
+Bidirectional LSTM — participates in the seven-preset ablation.
 
-Uses shared infrastructure from src/dl_pipeline.py.
-Architecture preserved: 1-layer BiLSTM(32) + FC(64→32→out).
+Architecture preserved: 1-layer BiLSTM(32) + FC(64→32→out).  The MI / PCA /
+KMeansSMOTE preprocessing is driven by the ``--experiment`` ablation preset
+(identical hyperparameters to Tier 1: MI k=15, PCA 0.95 variance,
+KMeansSMOTE k_neighbors=3, no undersampling).
 """
 
 import sys
@@ -30,7 +32,7 @@ from src.dl_pipeline import (
     preprocess_fold, preprocess_final,
     evaluate_with_proba, get_probabilities, save_dl_artifacts,
 )
-from src.experiment_config import build_experiment_config
+from src.experiment_config import build_experiment_config, resolve_experiment
 
 set_seeds(42)
 device = get_device()
@@ -67,7 +69,11 @@ class BiLSTMNetwork(nn.Module):
 # Pipeline
 # ======================================================================
 
-def main(data_dir="data/raw"):
+def main(data_dir="data/raw", experiment="mi_pca_balancing"):
+    flags = resolve_experiment(experiment)
+    use_mi, use_pca, use_balancing = (
+        flags["use_mi"], flags["use_pca"], flags["use_balancing"],
+    )
     data = load_data(data_dir)
     X_train, X_test = data['X_train'], data['X_test']
     y_train, y_test = data['y_train'], data['y_test']
@@ -76,7 +82,11 @@ def main(data_dir="data/raw"):
     class_names = data['class_names']
 
     print(f"\n{'='*60}")
-    print(f"  {MODEL_NAME} - BiLSTM + MI(30) + PCA(15) + KMeansSMOTE")
+    print(f"  {MODEL_NAME} - BiLSTM")
+    print(f"  Experiment: {experiment}  "
+          f"(MI={'on' if use_mi else 'off'}, "
+          f"PCA={'on' if use_pca else 'off'}, "
+          f"KMeansSMOTE={'on' if use_balancing else 'off'})")
     print(f"{'='*60}")
     print(f"\n  Cross-Validation (5 folds)")
 
@@ -90,8 +100,9 @@ def main(data_dir="data/raw"):
 
         fold_data = preprocess_fold(
             X_tr, y_tr, X_val, y_val,
-            mi_k=30, pca_components=15,
-            n_clusters=20, k_neighbors=2, rus_cap=15000,
+            mi_k=15, pca_variance=0.95,
+            n_clusters=20, k_neighbors=3, rus_cap=0,
+            use_mi=use_mi, use_pca=use_pca, use_balancing=use_balancing,
         )
 
         X_tr_t = torch.tensor(fold_data['X_tr'], dtype=torch.float32)
@@ -130,8 +141,9 @@ def main(data_dir="data/raw"):
     print(f"\n  === Final Retrain ===")
     final_data = preprocess_final(
         X_train, y_train, X_test, y_test,
-        mi_k=30, pca_components=15,
-        n_clusters=20, k_neighbors=2, rus_cap=15000,
+        mi_k=15, pca_variance=0.95,
+        n_clusters=20, k_neighbors=3, rus_cap=0,
+        use_mi=use_mi, use_pca=use_pca, use_balancing=use_balancing,
     )
 
     X_tr_t = torch.tensor(final_data['X_train'], dtype=torch.float32)
@@ -173,6 +185,7 @@ def main(data_dir="data/raw"):
         final_model, MODEL_NAME,
         cv_metrics=cv_metrics,
         test_metrics=test_metrics,
+        experiment=experiment,
         class_names=class_names,
         normal_class_idx=normal_class_idx,
         y_test=y_test, y_test_pred=test_preds,
@@ -185,9 +198,14 @@ def main(data_dir="data/raw"):
             model_params={"hidden_dim": 32, "dropout": 0.2,
                           "lr": 0.005, "weight_decay": 1e-4,
                           "epochs": 5, "batch_size": 512},
-            mi_k=30, pca_variance=None, tier=2,
-            dl_extra={"preprocessing": ["MI_k30", "StandardScaler", "PCA_15", "KMeansSMOTE"],
-                      "balance_strategy": "kmeans"},
+            experiment_name=experiment,
+            preprocessing_mode=experiment,
+            use_mi=use_mi, use_pca=use_pca, use_balancing=use_balancing,
+            mi_k=15, pca_variance=0.95,
+            n_splits=5, balancer="kmeans",
+            k_neighbors=3, rus_cap=0,
+            tier=2, ablation_scope="tier2",
+            dl_extra={"balance_strategy": "kmeans"},
         ),
     )
 
@@ -196,7 +214,13 @@ def main(data_dir="data/raw"):
 
 if __name__ == "__main__":
     import argparse
+    from src.experiment_config import ABLATION_PRESETS
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-dir", default="data/raw")
+    parser.add_argument(
+        "--experiment", choices=list(ABLATION_PRESETS.keys()),
+        default="mi_pca_balancing",
+        help="Ablation preset (default: mi_pca_balancing).",
+    )
     args = parser.parse_args()
-    main(data_dir=args.data_dir)
+    main(data_dir=args.data_dir, experiment=args.experiment)
