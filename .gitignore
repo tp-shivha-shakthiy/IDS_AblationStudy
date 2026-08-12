@@ -7,3 +7,4 @@ __pycache__/
 AUDIT.md
 ARCHITECTURE_GAP.md
 REFACTORING_REPORT.md
+.venv/
