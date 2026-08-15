@@ -1,0 +1,2 @@
+Model,Raw,MI,PCA,MI+PCA
+LogReg,0.9989,0.9982,0.9977,0.9958

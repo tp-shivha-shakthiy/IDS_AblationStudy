@@ -16,6 +16,18 @@ import datetime
 import subprocess
 
 
+# ---------------------------------------------------------------------------
+# Official balancing protocol
+# ---------------------------------------------------------------------------
+# Per-class undersampling cap applied BEFORE KMeansSMOTE oversampling on the
+# full 2,540,044-row UNSW-NB15 dataset.  Each class is capped to this many
+# samples so the balanced folds stay at ~150,000 rows instead of exploding to
+# ~17.75M when the ~1.77M-sample Normal class drives the SMOTE target.
+# Matches the --cap 15000 protocol introduced in 665aff1 and already recorded
+# in the corrected mi_pca_balancing run configs.
+OFFICIAL_RUS_CAP = 15000
+
+
 def get_git_commit() -> str:
     """Return the current git commit hash, or 'unavailable'."""
     try:

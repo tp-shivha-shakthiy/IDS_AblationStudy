@@ -25,6 +25,7 @@ from src.experiment_config import (
     ABLATION_PRESETS,
     ABLATION_ORDER,
     ABLATION_DISPLAY_NAMES,
+    OFFICIAL_RUS_CAP,
     resolve_experiment,
     build_experiment_config,
 )
@@ -351,7 +352,11 @@ class TestAblationTables:
                     **ABLATION_PRESETS[exp], "seed": 42,
                     "feature_selection_k": 15, "pca_variance": 0.95,
                     "balancer": "kmeans", "cv_folds": 5,
-                    "balancer_k_neighbors": 3, "balancer_rus_cap": 0,
+                    "balancer_k_neighbors": 3,
+                    "balancer_rus_cap": (
+                        OFFICIAL_RUS_CAP
+                        if ABLATION_PRESETS[exp]['use_balancing'] else 0
+                    ),
                 }, f)
             open(os.path.join(exp_dir, f"{model.lower()}_model.joblib"), 'wb').close()
 
@@ -404,6 +409,27 @@ class TestAblationTables:
         with pytest.raises(ValueError, match="cv_folds=5"):
             build_model_ablation_rows("HGB", str(tmp_path))
 
+    def test_build_rows_rejects_balancing_with_wrong_rus_cap(self, tmp_path):
+        """Balancing experiments must record the official cap (15000)."""
+        self._fabricate_experiments(str(tmp_path))
+        exp = "mi_balancing"
+        path = os.path.join(str(tmp_path), "HGB", exp, "experiment_config.json")
+        with open(path) as f:
+            config = json.load(f)
+        config["balancer_rus_cap"] = 0
+        with open(path, 'w') as f:
+            json.dump(config, f)
+
+        with pytest.raises(ValueError, match="balancer_rus_cap=15000"):
+            build_model_ablation_rows("HGB", str(tmp_path))
+
+    def test_build_rows_accepts_mixed_rus_cap_on_nonbalancing(self, tmp_path):
+        """Non-balancing baselines may keep balancer_rus_cap=0 (no balancer)."""
+        self._fabricate_experiments(str(tmp_path))
+        summary_rows, cv_rows = build_model_ablation_rows("HGB", str(tmp_path))
+        assert len(summary_rows) == 7
+        assert len(cv_rows) == 7
+
     def test_build_rows_accepts_tier2_ablation_scope(self, tmp_path):
         """DL models with ablation_scope='tier2' must aggregate into 7 rows."""
         model = "DNN"
@@ -423,7 +449,11 @@ class TestAblationTables:
                     **ABLATION_PRESETS[exp], "seed": 42,
                     "feature_selection_k": 15, "pca_variance": 0.95,
                     "balancer": "kmeans", "cv_folds": 5,
-                    "balancer_k_neighbors": 3, "balancer_rus_cap": 0,
+                    "balancer_k_neighbors": 3,
+                    "balancer_rus_cap": (
+                        OFFICIAL_RUS_CAP
+                        if ABLATION_PRESETS[exp]['use_balancing'] else 0
+                    ),
                 }, f)
             open(os.path.join(exp_dir, "dnn_model.joblib"), 'wb').close()
 
@@ -463,6 +493,7 @@ class TestAblationTables:
                 "HGB", X_train, y_train, X_test, y_test,
                 class_names=["c0", "c1", "c2", "c3", "c4"],
                 n_splits=5, mi_k=15, pca_variance=0.95, k_neighbors=3,
+                rus_cap=OFFICIAL_RUS_CAP,
                 use_mi=flags["use_mi"], use_pca=flags["use_pca"],
                 use_balancing=flags["use_balancing"], experiment=experiment,
             )

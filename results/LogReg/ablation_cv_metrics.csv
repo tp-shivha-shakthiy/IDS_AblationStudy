@@ -1,0 +1,5 @@
+Model,Experiment,Preprocessing,MI,PCA,KMeansSMOTE,cv_accuracy,cv_precision,cv_recall,cv_f1,cv_auc
+LogReg,Raw,Raw,No,No,No,0.9743,0.9711,0.9743,0.9714,0.9990
+LogReg,MI,MI,Yes,No,No,0.9711,0.9666,0.9711,0.9678,0.9983
+LogReg,PCA,PCA,No,Yes,No,0.9688,0.9642,0.9688,0.9658,0.9977
+LogReg,MI+PCA,MI+PCA,Yes,Yes,No,0.9553,0.9543,0.9553,0.9538,0.9957

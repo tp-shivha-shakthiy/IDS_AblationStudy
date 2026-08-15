@@ -32,7 +32,7 @@ from src.dl_pipeline import (
     compute_class_weights, evaluate_with_proba, get_probabilities,
     save_dl_artifacts, preprocess_fold, preprocess_final,
 )
-from src.experiment_config import build_experiment_config, resolve_experiment
+from src.experiment_config import build_experiment_config, resolve_experiment, OFFICIAL_RUS_CAP
 
 set_seeds(42)
 device = get_device()
@@ -65,7 +65,7 @@ class DeepNeuralNetwork(nn.Module):
 # Pipeline
 # ======================================================================
 
-def main(data_dir="data/raw", experiment="mi_pca_balancing"):
+def main(data_dir="data/raw", experiment="mi_pca_balancing", cap=OFFICIAL_RUS_CAP):
     flags = resolve_experiment(experiment)
     use_mi, use_pca, use_balancing = (
         flags["use_mi"], flags["use_pca"], flags["use_balancing"],
@@ -98,7 +98,7 @@ def main(data_dir="data/raw", experiment="mi_pca_balancing"):
         fold_data = preprocess_fold(
             X_tr, y_tr, X_val, y_val,
             mi_k=15, pca_variance=0.95,
-            n_clusters=20, k_neighbors=3, rus_cap=0,
+            n_clusters=20, k_neighbors=3, rus_cap=cap,
             use_mi=use_mi, use_pca=use_pca, use_balancing=use_balancing,
         )
         X_tr_s, X_val_s = fold_data['X_tr'], fold_data['X_val']
@@ -142,7 +142,7 @@ def main(data_dir="data/raw", experiment="mi_pca_balancing"):
     final_data = preprocess_final(
         X_train, y_train, X_test, y_test,
         mi_k=15, pca_variance=0.95,
-        n_clusters=20, k_neighbors=3, rus_cap=0,
+        n_clusters=20, k_neighbors=3, rus_cap=cap,
         use_mi=use_mi, use_pca=use_pca, use_balancing=use_balancing,
     )
     X_train_s, X_test_s = final_data['X_train'], final_data['X_test']
@@ -204,7 +204,7 @@ def main(data_dir="data/raw", experiment="mi_pca_balancing"):
             use_mi=use_mi, use_pca=use_pca, use_balancing=use_balancing,
             mi_k=15, pca_variance=0.95,
             n_splits=5, balancer="kmeans",
-            k_neighbors=3, rus_cap=0,
+            k_neighbors=3, rus_cap=cap,
             tier=2, ablation_scope="tier2",
             dl_extra={"preprocessing": ["StandardScaler"],
                       "balance_strategy": "class_weights"},
@@ -225,5 +225,10 @@ if __name__ == "__main__":
         help="Ablation preset (default: mi_pca_balancing). "
              "Use 'raw' for the scaler-only baseline.",
     )
+    parser.add_argument(
+        "--cap", type=int, default=OFFICIAL_RUS_CAP,
+        help="Per-class sample cap before KMeansSMOTE oversampling "
+             "(0 = no cap). Official full-data protocol: 15000.",
+    )
     args = parser.parse_args()
-    main(data_dir=args.data_dir, experiment=args.experiment)
+    main(data_dir=args.data_dir, experiment=args.experiment, cap=args.cap)

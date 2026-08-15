@@ -51,7 +51,7 @@ def plot_confusion_matrix(
     y_pred_bin = np.where(y_pred == normal_class_idx, 0, 1)
 
     fig, ax = plt.subplots(figsize=(5, 4))
-    cm_bin = confusion_matrix(y_true_bin, y_pred_bin)
+    cm_bin = confusion_matrix(y_true_bin, y_pred_bin, labels=[0, 1])
     ConfusionMatrixDisplay(cm_bin, display_labels=['Normal', 'Attack']).plot(
         ax=ax, colorbar=False, cmap='Blues'
     )
@@ -64,7 +64,7 @@ def plot_confusion_matrix(
 
     # --- Multi-class CM ---
     fig, ax = plt.subplots(figsize=(10, 8))
-    cm_multi = confusion_matrix(y_true, y_pred)
+    cm_multi = confusion_matrix(y_true, y_pred, labels=range(len(class_names)))
     ConfusionMatrixDisplay(cm_multi, display_labels=class_names).plot(
         ax=ax, colorbar=True, cmap='Blues', xticks_rotation=45
     )
@@ -364,7 +364,7 @@ def build_model_ablation_rows(
     """
     from src.experiment_config import ABLATION_ORDER, ABLATION_DISPLAY_NAMES
 
-    from src.experiment_config import ABLATION_PRESETS
+    from src.experiment_config import ABLATION_PRESETS, OFFICIAL_RUS_CAP
 
     records = []
     for exp in ABLATION_ORDER:
@@ -426,7 +426,6 @@ def build_model_ablation_rows(
             'pca_variance': 0.95,
             'cv_folds': 5,
             'balancer_k_neighbors': 3,
-            'balancer_rus_cap': 0,
         }
         for key, value in expected_metadata.items():
             if config.get(key) != value:
@@ -435,12 +434,22 @@ def build_model_ablation_rows(
                     f"{key}={value}."
                 )
 
+        # Balancing presets must use the official per-class cap so the
+        # KMeansSMOTE oversampling target is bounded.  Non-balancing presets
+        # (raw/mi/pca/mi_pca) never invoke the balancer, so their recorded
+        # balancer_rus_cap value is metadata-only and may differ.
+        if ABLATION_PRESETS[exp]['use_balancing'] and \
+                config.get('balancer_rus_cap') != OFFICIAL_RUS_CAP:
+            raise ValueError(
+                f"Cannot aggregate {model_name}: balancing experiment '{exp}' must use "
+                f"balancer_rus_cap={OFFICIAL_RUS_CAP}."
+            )
+
         records.append((exp, config, tm_path, cv_path))
 
     reference = records[0][1]
     reproducibility_keys = ('seed', 'feature_selection_k', 'pca_variance',
-                            'balancer', 'cv_folds', 'balancer_k_neighbors',
-                            'balancer_rus_cap')
+                            'balancer', 'cv_folds', 'balancer_k_neighbors')
     for exp, config, _, _ in records[1:]:
         inconsistent = [
             key for key in reproducibility_keys

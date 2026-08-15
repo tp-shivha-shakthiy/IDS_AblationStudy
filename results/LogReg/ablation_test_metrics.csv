@@ -1,0 +1,5 @@
+Model,Experiment,Preprocessing,MI,PCA,KMeansSMOTE,accuracy,precision,recall,f1,auc,multi_acc,macro_f1,weighted_f1,binary_acc,binary_f1,binary_auc
+LogReg,Raw,Raw,No,No,No,0.9743,0.9714,0.9743,0.9715,0.9989,0.9743,0.3919,0.9715,0.9990,0.9995,0.9916
+LogReg,MI,MI,Yes,No,No,0.9711,0.9671,0.9711,0.9679,0.9982,0.9711,0.3745,0.9679,0.9989,0.9995,0.9901
+LogReg,PCA,PCA,No,Yes,No,0.9687,0.9641,0.9687,0.9658,0.9977,0.9687,0.3630,0.9658,0.9989,0.9995,0.9886
+LogReg,MI+PCA,MI+PCA,Yes,Yes,No,0.9551,0.9543,0.9551,0.9537,0.9958,0.9551,0.3077,0.9537,0.9989,0.9995,0.9803

@@ -1,0 +1,5 @@
+Model,Experiment,Preprocessing,MI,PCA,KMeansSMOTE,accuracy,precision,recall,f1,auc,multi_acc,macro_f1,weighted_f1,binary_acc,binary_f1,binary_auc
+XGBoost,Raw,Raw,No,No,No,0.9638,0.9494,0.9638,0.9527,0.9985,0.9638,0.2970,0.9527,0.9989,0.9995,0.9880
+XGBoost,MI,MI,Yes,No,No,0.9563,0.9169,0.9563,0.9361,0.9904,0.9563,0.1962,0.9361,0.9989,0.9995,0.9379
+XGBoost,PCA,PCA,No,Yes,No,0.9000,0.8688,0.9000,0.8665,0.9858,0.9000,0.1419,0.8665,0.9989,0.9995,0.9317
+XGBoost,MI+PCA,MI+PCA,Yes,Yes,No,0.9423,0.9099,0.9423,0.9230,0.9955,0.9423,0.2234,0.9230,0.9989,0.9995,0.9847

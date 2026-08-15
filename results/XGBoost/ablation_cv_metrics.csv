@@ -1,0 +1,5 @@
+Model,Experiment,Preprocessing,MI,PCA,KMeansSMOTE,cv_accuracy,cv_precision,cv_recall,cv_f1,cv_auc
+XGBoost,Raw,Raw,No,No,No,0.9634,0.9491,0.9634,0.9520,0.9985
+XGBoost,MI,MI,Yes,No,No,0.9563,0.9169,0.9563,0.9361,0.9906
+XGBoost,PCA,PCA,No,Yes,No,0.9008,0.8694,0.9008,0.8678,0.9857
+XGBoost,MI+PCA,MI+PCA,Yes,Yes,No,0.9421,0.9098,0.9421,0.9227,0.9954

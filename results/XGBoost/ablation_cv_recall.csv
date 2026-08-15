@@ -1,0 +1,2 @@
+Model,Raw,MI,PCA,MI+PCA
+XGBoost,0.9634,0.9563,0.9008,0.9421

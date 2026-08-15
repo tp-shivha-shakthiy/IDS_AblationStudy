@@ -68,6 +68,7 @@ from src.evaluation               import (
 from src.experiment_config        import (
     ABLATION_PRESETS,
     ABLATION_DISPLAY_NAMES,
+    OFFICIAL_RUS_CAP,
     resolve_experiment,
     save_experiment_config,
     build_model_config,
@@ -104,6 +105,12 @@ def parse_args():
         '--quick', type=int, default=0,
         help='Run on a stratified random sample of N rows '
              '(e.g. --quick 200000) to verify the pipeline end-to-end'
+    )
+    parser.add_argument(
+        '--cap', type=int, default=OFFICIAL_RUS_CAP,
+        help='Per-class sample cap applied BEFORE KMeansSMOTE oversampling '
+             '(0 = no cap). Official full-data protocol: 15000. Only active '
+             'for balancing presets (use_balancing=True).'
     )
     return parser.parse_args()
 
@@ -178,7 +185,7 @@ def main():
         n_splits=5,
         mi_k=15,
         pca_variance=0.95,
-        rus_cap=0,
+        rus_cap=args.cap,
         fold_cache=fold_cache,
         use_mi=use_mi,
         use_pca=use_pca,
@@ -197,7 +204,7 @@ def main():
         n_splits=5,
         mi_k=15,
         pca_variance=0.95,
-        rus_cap=0,
+        rus_cap=args.cap,
         fold_cache=fold_cache,
         use_mi=use_mi,
         use_pca=use_pca,
@@ -216,7 +223,7 @@ def main():
         n_splits=5,
         mi_k=15,
         pca_variance=0.95,
-        rus_cap=0,
+        rus_cap=args.cap,
         fold_cache=fold_cache,
         use_mi=use_mi,
         use_pca=use_pca,
@@ -278,7 +285,7 @@ def main():
             n_splits=5,
             balancer="kmeans",
             k_neighbors=3,
-            rus_cap=0,
+            rus_cap=args.cap,
         )
         save_experiment_config(cfg, save_dir=res['save_dir'])
 
