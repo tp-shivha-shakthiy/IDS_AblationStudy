@@ -22,8 +22,8 @@
   "scaler_scope": "per_fold_training_data",
   "test_set_locked": true,
   "final_retrain": "full_80_percent_training_set",
-  "timestamp": "2026-08-16T17:51:34.081378",
-  "git_commit": "76f5db5b1f5a217abb68060068dbb018e0d7878b",
+  "timestamp": "2026-08-24T16:12:31.837336",
+  "git_commit": "a1ab35f8f483976874822fe4bacf6cc5f7cfc2d6",
   "pca_variance": 0.95,
   "pca_scope": "per_fold_training_data",
   "model_hyperparameters": {
