@@ -3,6 +3,7 @@
 Complete leakage-free ablation results from the **real training runs** (80/20 split, locked 20% test set).
 Per-experiment metrics are read from `results/<Model>/<experiment>/test_metrics.json`.
 **Smoke tests are excluded** — this table reflects only full real training.
+Includes both Tier-1 classical models (HGB, XGBoost, LogReg) and Tier-2 deep-learning models (DNN, DNN_MI_PCA_KMeans, and the LSTM / Bi-LSTM family).
 
 Three factors are varied: **MI** (mutual-information feature selection), **PCA** (95% variance), **KMeansSMOTE** (K-means SMOTE balancing).
 StandardScaler is always on and is not an ablation factor.
@@ -117,14 +118,99 @@ StandardScaler is always on and is not an ablation factor.
 
 ---
 
+# Deep-Learning (Tier 2) Results
+
+## DL Ablation Runs (per-experiment, `results/<Model>/<experiment>/`)
+
+Two DNN variants have per-experiment ablation runs. **DNN** (2-layer 64→32, class-weight loss) has all 7 experiments;
+**DNN_MI_PCA_KMeans** (3-layer 128→64→32, KMeans balancing) has 4.
+
+> Note: `DNN_MI_PCA_KMeans` at ~0.979 accuracy is notably higher than the `DNN` class-weight variant (~0.96) — the
+> 3-layer architecture with K-means-balanced training (RUS cap 15,000 + KMeansSMOTE) generalises better on the test set.
+
+### DNN (2-layer, class-weight loss) — test set
+
+| Experiment | Accuracy | Precision | Recall | F1 | AUC | Macro F1 | Weighted F1 | Bin Acc | Bin AUC |
+|---|---|---|---|---|---|---|---|---|---|
+| raw | 0.9638 | 0.9826 | 0.9638 | 0.9705 | **0.9992** | 0.4684 | 0.9705 | 0.9855 | **0.9994** |
+| mi | 0.9598 | **0.9838** | 0.9598 | 0.9691 | 0.9988 | 0.4466 | 0.9691 | 0.9836 | 0.9991 |
+| mi_balancing | 0.9642 | 0.9811 | 0.9642 | **0.9709** | 0.9987 | 0.4615 | **0.9709** | 0.9867 | 0.9989 |
+| pca | 0.9604 | 0.9833 | 0.9604 | 0.9690 | 0.9990 | 0.4588 | 0.9690 | 0.9843 | 0.9992 |
+| pca_balancing | **0.9648** | 0.9816 | **0.9648** | 0.9716 | 0.9990 | **0.4695** | **0.9716** | **0.9859** | 0.9992 |
+| mi_pca | 0.9643 | 0.9833 | 0.9643 | 0.9710 | 0.9989 | **0.4779** | 0.9710 | 0.9844 | 0.9992 |
+| mi_pca_balancing | 0.9622 | 0.9792 | 0.9622 | 0.9689 | 0.9987 | 0.4394 | 0.9689 | 0.9845 | 0.9990 |
+
+### DNN_MI_PCA_KMeans (3-layer, KMeans-balanced) — test set
+
+| Experiment | Accuracy | Precision | Recall | F1 | AUC | Macro F1 | Weighted F1 | Bin Acc | Bin AUC |
+|---|---|---|---|---|---|---|---|---|---|
+| raw | **0.9796** | **0.9785** | **0.9796** | **0.9760** | **0.9995** | 0.4669 | **0.9760** | **0.9925** | **0.9997** |
+| mi | 0.9789 | 0.9777 | 0.9789 | 0.9755 | 0.9995 | **0.4753** | 0.9755 | 0.9920 | 0.9996 |
+| pca | 0.9788 | 0.9781 | 0.9788 | 0.9753 | 0.9995 | 0.4655 | 0.9753 | 0.9921 | 0.9997 |
+| mi_pca | 0.9781 | 0.9747 | 0.9781 | 0.9740 | 0.9994 | 0.4372 | 0.9740 | 0.9913 | 0.9996 |
+
+---
+
+## DL Model Comparison (default MI+PCA+KMeans pipeline, single run)
+
+Legacy single-pipeline runs saved under `models/artifacts/<Model>/`. Each model was trained once on the full
+MI+PCA+KMeansSMOTE pipeline (binary + multi-class), evaluated on the locked 20% test set.
+
+| Model | Architecture / Preprocessing | Multi Acc | Macro F1 | Weighted F1 | Precision | Recall | AUC | Bin Acc | Bin F1 |
+|---|---|---|---|---|---|---|---|---|---|
+| **DNN_MI_PCA_KMeans** | 3-layer DNN, MI+PCA+KMeans (input 15) | **0.9665** | **0.4992** | **0.9729** | 0.9834 | 0.9665 | **0.9992** | 0.9868 | 0.9505 |
+| BiLSTM | Bi-LSTM (hidden 32), MI+PCA+KMeans | 0.9665 | 0.5022 | 0.9728 | 0.9834 | 0.9665 | 0.9990 | 0.9865 | 0.9492 |
+| DNN | 2-layer DNN, Scaler + class weights (input 45) | 0.9665 | 0.4887 | 0.9723 | 0.9825 | 0.9665 | 0.9990 | 0.9857 | 0.9465 |
+| BiLSTM_SharedFE | Multi-task Bi-LSTM (shared backbone) | 0.9661 | 0.4884 | 0.9727 | **0.9839** | 0.9661 | 0.9992 | **0.9870** | **0.9510** |
+| LSTM | LSTM (hidden 32), MI+PCA+KMeans | 0.9655 | 0.4897 | 0.9721 | 0.9826 | 0.9655 | 0.9989 | 0.9858 | 0.9469 |
+
+*Bold = best value across the five DL models. All DL models use the leakage-free protocol and the locked test set.*
+
+### DL model comparison — mean cross-validation (5 folds)
+
+| Model | CV Multi Acc | CV Macro F1 | CV AUC |
+|---|---|---|---|
+| DNN | 0.9659 | 0.4843 | 0.9991 |
+| DNN_MI_PCA_KMeans | 0.9646 | 0.4772 | 0.9993 |
+| LSTM | 0.9644 | 0.4717 | 0.9990 |
+| BiLSTM | 0.9649 | 0.4769 | 0.9990 |
+| BiLSTM_SharedFE | 0.9653 | 0.4758 | 0.9993 |
+
+---
+
+## Combined All-Model View
+
+Best test-set accuracy per model among the configurations that were actually run.
+Tier-1 models use their `mi_pca_balancing` (full pipeline) result; DL models show both their full-pipeline single-run value
+and (where run) their ablation range.
+
+| Model | Pipeline | Test Accuracy | Weighted F1 | AUC |
+|---|---|---|---|---|
+| **HGB** | mi_pca_balancing | 0.9629 | 0.9693 | 0.9976 |
+| **DNN_MI_PCA_KMeans** | raw (best per-exp) | **0.9796** | 0.9760 | 0.9995 |
+| DNN_MI_PCA_KMeans | default single-run | 0.9665 | 0.9729 | 0.9992 |
+| DNN (class-weight) | mi_pca_balancing | 0.9622 | 0.9689 | 0.9987 |
+| DNN (class-weight) | raw | 0.9638 | 0.9705 | 0.9992 |
+| XGBoost | mi_pca_balancing | 0.9194 | 0.9340 | 0.9874 |
+| LogReg | mi_pca_balancing | 0.9527 | 0.9617 | 0.9916 |
+| BiLSTM / BiLSTM_SharedFE / LSTM | default single-run | 0.9655–0.9665 | 0.9721–0.9728 | 0.9989–0.9992 |
+
+---
+
 ## Summary / Key Observations
 
-- **HGB is the strongest model** on every experiment (highest test accuracy and AUC in all 7 configurations).
-- **Raw (no MI/PCA/balancing) is best for every model** — preprocessing ablations all *reduce* raw accuracy.
+**Tier 1 (classical):**
+- **HGB is the strongest classical model** on every experiment (highest test accuracy and AUC in all 7 configurations).
+- **Raw (no MI/PCA/balancing) is best for every classical model** — preprocessing ablations all *reduce* raw accuracy.
   Slight gains appear only in class-balance metrics (Macro F1, e.g. XGBoost `mi_balancing` macro F1 0.3812 vs raw 0.2544) because KMeansSMOTE rebalances rare classes.
 - **KMeansSMOTE consistently lowers overall accuracy** but raises precision and Macro F1 (better minority-class handling).
 - XGBoost is the most sensitive to ablations — its accuracy drops most with balancing (`mi_balancing` 0.8712, `mi_pca_balancing` 0.9194 with a notably low binary AUC of 0.7364).
 
+**Tier 2 (deep learning):**
+- The 3-layer **DNN_MI_PCA_KMeans** is the strongest DL model — its per-experiment results (0.978–0.980) beat every Tier-1 classical model, and its default single-run test accuracy (0.9665) is competitive with HGB.
+- **BiLSTM_SharedFE** (multi-task) edges out the plain BiLSTM/LSTM on binary accuracy and binary F1.
+- DL models are far more robust to disabling balancing than XGBoost: their accuracy changes only slightly across ablations.
+
 ---
 
-*File generated from `results/<Model>/<experiment>/test_metrics.json` and `cv_metrics.csv` (real training only; smoke tests excluded).*
+*File generated from `results/<Model>/<experiment>/test_metrics.json` + `cv_metrics.csv` (real training only; smoke tests excluded) and `models/artifacts/<Model>/*_test_metrics.json` for the DL single-run comparison.*
