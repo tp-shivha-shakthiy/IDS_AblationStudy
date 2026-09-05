@@ -8,26 +8,21 @@ Implements the framework described in:
 
 ---
 
-## Corrected Results (Leakage-Free Pipeline)
+## Full-Pipeline Results (Current Leakage-Free Runs)
 
-After eliminating data leakage (Scaler/PCA fit on full data, fold-0 retraining), corrected metrics on the locked 20% test set:
+Metrics on the locked 20% test set for the current canonical full pipeline
+(`mi_pca_balancing` = MI + PCA + KMeansSMOTE), read directly from
+`results/<Model>/mi_pca_balancing/test_metrics.json`:
 
 | Model | Accuracy | Precision | Recall | Weighted F1 | AUC |
 |---|---|---|---|---|---|
-| **HGB** | **0.9628** | **0.9831** | **0.9628** | **0.9703** | **0.9975** |
-| XGBoost | 0.9122 | 0.9498 | 0.9122 | 0.9275 | 0.9834 |
-| Logistic Regression | 0.9545 | 0.9763 | 0.9545 | 0.9640 | 0.9922 |
+| **HGB** | **0.9629** | **0.9792** | **0.9629** | **0.9693** | **0.9976** |
+| XGBoost | 0.9194 | 0.9543 | 0.9194 | 0.9340 | 0.9874 |
+| Logistic Regression | 0.9527 | 0.9743 | 0.9527 | 0.9617 | 0.9916 |
 
-### Legacy Results (Pre-Correction)
-
-The previous pipeline had known methodological issues (data leakage, fold-0 retraining). Preserved at `results/legacy_pipeline/` for reference only.
-
-| Model | Binary Acc | Binary F1 | Multi-class Acc | Macro F1 | Weighted F1 |
-|---|---|---|---|---|---|
-| XGBoost | 0.9848 | 0.9431 | 0.9624 | 0.4519 | 0.9701 |
-| Logistic Regression | 0.9821 | 0.9337 | 0.9535 | 0.3705 | 0.9626 |
-
-**Do not interpret accuracy decreases as model failures.** The legacy pipeline's inflated metrics were caused by preprocessing leakage.
+The authoritative result set is the full seven-experiment ablation
+(Raw, MI, MI+KMeansSMOTE, PCA, PCA+KMeansSMOTE, MI+PCA, MI+PCA+KMeansSMOTE)
+under `results/<Model>/<experiment>/` — see `results/RESULTS_TABLE.md`.
 
 ---
 
@@ -120,23 +115,23 @@ INTRUSION-DETECTION-SYSTEM/
 │   └── Architecture.jpeg                Pipeline architecture diagram
 │
 ├── results/
-│   ├── legacy_pipeline/                 Historical benchmarks (pre-correction)
-│   ├── corrected_pipeline/              Legacy corrected-run CSVs (reference)
 │   ├── <experiment>/                    Cross-model comparison per experiment
+│   ├── RESULTS_TABLE.md                 Ablation result tables (manuscript-facing)
 │   ├── HGB/
 │   │   ├── raw/ … mi_pca_balancing/     Per-experiment: model, metrics, config, plots
 │   │   └── ablation_*.csv               Per-model 7-row ablation tables
 │   ├── XGBoost/
 │   │   ├── raw/ … mi_pca_balancing/
 │   │   └── ablation_*.csv
-│   └── LogReg/
-│       ├── raw/ … mi_pca_balancing/
+│   ├── LogReg/
+│   │   ├── raw/ … mi_pca_balancing/
+│   │   └── ablation_*.csv
+│   ├── DNN/
+│   │   ├── raw/ … mi_pca_balancing/     DL per-experiment ablation runs
+│   │   └── ablation_*.csv
+│   └── DNN_MI_PCA_KMeans/
+│       ├── raw/, mi/, pca/, mi_pca/     DL per-experiment ablation runs
 │       └── ablation_*.csv
-│
-└── artifacts/                           Model + preprocessing artifacts (joblib)
-    ├── hgb/
-    ├── xgboost/
-    └── logistic_regression/
 ```
 
 ---
@@ -353,7 +348,7 @@ All models report:
 | Weighted F1 | Support-weighted F1 across classes |
 | AUC | One-vs-rest weighted AUC |
 
-Per-class precision, recall, and F1 are saved to `results/corrected_pipeline/*_per_class_report.csv`.
+Per-class precision, recall, and F1 are saved to `results/<experiment>/<model>_per_class_report.csv`.
 
 ### Output Files
 
@@ -370,8 +365,7 @@ Per-class precision, recall, and F1 are saved to `results/corrected_pipeline/*_p
 | `results/<Model>/ablation_<metric>.csv` | Pivoted metric tables (Model × experiment) |
 | `results/<experiment>/model_comparison.csv` | Blind-test comparison across models for one experiment |
 | `results/<experiment>/metrics.csv` | CV metrics across models for one experiment |
-| `results/legacy_pipeline/` | Historical benchmarks |
-| `artifacts/*/model.joblib` | Trained model files |
+| `results/RESULTS_TABLE.md` | Ablation result tables (manuscript-facing) |
 
 ---
 
