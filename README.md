@@ -60,9 +60,9 @@ python main.py --experiment mi_pca         # MI + PCA
 python main.py --experiment mi_pca_balancing   # full pipeline (default)
 ```
 
-Presets are the single source of truth for preprocessing: using `--experiment` together with `--balancer` / `--mi-k` / `--pca-variance` overrides raises a `ValueError`.
+The ablation presets are the single source of truth for preprocessing. MI k, PCA variance, balancer and CV folds are fixed by the protocol (MI k=15, PCA 95%, KMeansSMOTE, 5 folds) and are controlled solely through `--experiment`.
 
-Per-experiment outputs are written under `results/<Model>/<experiment>/`. After each run, the per-model comparison tables in `results/<Model>/` are regenerated; once all seven experiments have been run, `ablation_test_metrics.csv` / `ablation_cv_metrics.csv` contain exactly seven rows in the order **Raw, MI, MI+KMeansSMOTE, PCA, PCA+KMeansSMOTE, MI+PCA, MI+PCA+KMeansSMOTE**.
+Per-experiment outputs are written under `results/<Model>/<experiment>/`. After each run, the per-model comparison tables in `results/<Model>/` are regenerated; once a model's experiments are complete, `ablation_test_metrics.csv` / `ablation_cv_metrics.csv` contain exactly one row per experiment in canonical order (**Raw, MI, MI+KMeansSMOTE, PCA, PCA+KMeansSMOTE, MI+PCA, MI+PCA+KMeansSMOTE**). The canonical models are HGB, XGBoost, LogReg and DNN (seven presets each); DNN_MI_PCA_KMeans aggregates its four presets (Raw, MI, PCA, MI+PCA).
 
 ### Leakage invariants — unchanged for every experiment
 
@@ -94,11 +94,11 @@ INTRUSION-DETECTION-SYSTEM/
 │   └── train_logistic.py                Logistic Regression
 │
 ├── models/                              Deep learning training scripts (Tier 2)
-│   ├── train_dnn.py                     DNN baseline (class-weight loss)
-│   ├── train_dnn_mi_pca_kmeans.py       DNN + MI + PCA + KMeansSMOTE
-│   ├── train_LSTM.py                    Bi-LSTM + MI + PCA + KMeansSMOTE
-│   ├── train_Bi-LSTM.py                 Weighted Bi-LSTM + class-weight loss
-│   └── train_Bi-LSTM_shared-feature-extractor.py  Multi-task DNN (binary + multi-class heads)
+│   ├── train_dnn.py                     DNN (canonical ablation model)
+│   ├── train_dnn_mi_pca_kmeans.py       DNN + MI + PCA + KMeansSMOTE (canonical)
+│   ├── train_LSTM.py                    Bi-LSTM — legacy (not in canonical study)
+│   ├── train_Bi-LSTM.py                 Weighted Bi-LSTM — legacy (not in canonical study)
+│   └── train_Bi-LSTM_shared-feature-extractor.py  Multi-task DNN — legacy (not in canonical study)
 │
 ├── tests/
 │   ├── test_leakage.py                  Leakage verification + regression
@@ -223,11 +223,11 @@ Each DL script follows the same leakage-free protocol as Tier 1.
 
 | Script | Architecture | Preprocessing |
 |---|---|---|
-| `train_dnn.py` | 2-layer DNN (64→32) + BatchNorm + Dropout(0.1) | Scaler only, class-weight loss |
-| `train_dnn_mi_pca_kmeans.py` | 3-layer DNN (128→64→32) + BatchNorm + Dropout(0.2) | MI(30) → PCA(15) → RUS + KMeansSMOTE |
-| `train_LSTM.py` | Bi-LSTM (hidden=32, 1 layer) + FC(32→out) | MI(30) → PCA(15) → RUS + KMeansSMOTE |
-| `train_Bi-LSTM.py` | Weighted Bi-LSTM (hidden=32) + FC(32→out) | MI(30) → PCA(15) → RUS + KMeansSMOTE, class weights |
-| `train_Bi-LSTM_shared-feature-extractor.py` | Multi-task DNN: shared backbone (128→64), binary head + multi-class head, joint loss (0.4/0.6) | MI(30) → PCA(15) → RUS + KMeansSMOTE |
+| `train_dnn.py` | 2-layer DNN (64→32) + BatchNorm + Dropout(0.1) | Seven ablation presets (MI k=15, PCA 95%, KMeansSMOTE cap=15000) |
+| `train_dnn_mi_pca_kmeans.py` | 3-layer DNN (128→64→32) + BatchNorm + Dropout(0.2) | Four ablation presets: Raw, MI, PCA, MI+PCA (KMeansSMOTE intrinsic) |
+| `train_LSTM.py` | Bi-LSTM (hidden=32, 1 layer) + FC(32→out) | Legacy — not part of canonical study |
+| `train_Bi-LSTM.py` | Weighted Bi-LSTM (hidden=32) + FC(32→out) | Legacy — not part of canonical study |
+| `train_Bi-LSTM_shared-feature-extractor.py` | Multi-task DNN: shared backbone (128→64), binary + multi-class heads | Legacy — not part of canonical study |
 
 ---
 
@@ -257,15 +257,14 @@ python main.py
 
 ### 4. Run Tier 2 (DL models)
 
-Each model runs independently:
+Each model runs independently. The canonical Tier 2 models are `train_dnn.py` (all seven presets) and `train_dnn_mi_pca_kmeans.py` (raw, mi, pca, mi_pca):
 
 ```bash
 python models/train_dnn.py
 python models/train_dnn_mi_pca_kmeans.py
-python models/train_LSTM.py
-python "models/train_Bi-LSTM.py"
-python "models/train_Bi-LSTM_shared-feature-extractor.py"
 ```
+
+The legacy LSTM-family trainers (`train_LSTM.py`, `train_Bi-LSTM.py`, `train_Bi-LSTM_shared-feature-extractor.py`) are retained as exploratory code but are **not** part of the canonical study.
 
 All DL scripts accept `--data-dir` for custom data paths:
 
@@ -284,18 +283,15 @@ python -m pytest tests/test_leakage.py -v
 
 | Flag | Default | Description |
 |---|---|---|
-| `--data-dir` | `data/raw` | Path to raw CSV files |
+| `--data-dir` | `data/raw` | Directory containing UNSW-NB15_1..4.csv |
 | `--experiment` | `mi_pca_balancing` | Ablation preset: `raw`, `mi`, `mi_balancing`, `pca`, `pca_balancing`, `mi_pca`, `mi_pca_balancing` |
-| `--balancer` | `kmeans` | Balancing strategy: `kmeans` or `smote` |
-| `--n-splits` | `5` | Number of CV folds |
-| `--mi-k` | `15` | Top-k MI features to retain per fold |
-| `--pca-variance` | `0.95` | Cumulative PCA variance to retain |
-| `--cap` | `0` | Cap each class to N samples before oversampling (speed/RAM, e.g. `--cap 15000`) |
+| `--aggregate-ablation` | off | Validate all canonical experiments and rebuild `results/<Model>/ablation_*.csv` tables |
+| `--cap` | `15000` | Per-class undersampling cap before KMeansSMOTE oversampling (balancing presets only) |
 | `--quick` | `0` | Run on a stratified sample of N rows (pipeline smoke test) |
 | `--skip-plots` | off | Skip saving confusion matrix PNGs |
 
 ```bash
-python main.py --experiment mi --balancer smote --skip-plots
+python main.py --experiment mi --skip-plots
 python main.py --cap 15000 --quick 200000        # fast verification run
 ```
 
@@ -360,8 +356,8 @@ Per-class precision, recall, and F1 are saved to `results/<experiment>/<model>_p
 | `results/<Model>/<experiment>/*_model.joblib` | Trained model |
 | `results/<Model>/<experiment>/{scaler,pca,mi_selector,label_encoder}.joblib` | Fitted transformers |
 | `results/<Model>/<experiment>/*_cm.png`, `*_roc_curve.png` | Confusion matrices + ROC |
-| `results/<Model>/ablation_test_metrics.csv` | 7-row ablation table (test metrics), one per experiment |
-| `results/<Model>/ablation_cv_metrics.csv` | 7-row ablation table (mean CV metrics) |
+| `results/<Model>/ablation_test_metrics.csv` | Per-model ablation table (test metrics), one row per experiment |
+| `results/<Model>/ablation_cv_metrics.csv` | Per-model ablation table (mean CV metrics) |
 | `results/<Model>/ablation_<metric>.csv` | Pivoted metric tables (Model × experiment) |
 | `results/<experiment>/model_comparison.csv` | Blind-test comparison across models for one experiment |
 | `results/<experiment>/metrics.csv` | CV metrics across models for one experiment |

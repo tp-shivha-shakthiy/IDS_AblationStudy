@@ -353,21 +353,26 @@ def save_ablation_tables(
 def build_model_ablation_rows(
     model_name: str,
     experiments_root: str = "results",
+    experiments: list = None,
 ) -> tuple:
     """
     Aggregate per-experiment results for one model into table rows.
 
     Reads  results/<model>/<experiment>/test_metrics.json  and
-           results/<model>/<experiment>/cv_metrics.csv  for each of the
-    seven ablation presets (in canonical order) and returns
-    (summary_rows, cv_rows) ready for save_ablation_tables.
+           results/<model>/<experiment>/cv_metrics.csv  for each experiment
+    in the model's canonical set (by default the seven ablation presets in
+    canonical order) and returns (summary_rows, cv_rows) ready for
+    save_ablation_tables.
     """
     from src.experiment_config import ABLATION_ORDER, ABLATION_DISPLAY_NAMES
 
     from src.experiment_config import ABLATION_PRESETS, OFFICIAL_RUS_CAP
 
+    if experiments is None:
+        experiments = ABLATION_ORDER
+
     records = []
-    for exp in ABLATION_ORDER:
+    for exp in experiments:
         exp_dir = os.path.join(experiments_root, model_name, exp)
         config_path = os.path.join(exp_dir, "experiment_config.json")
         tm_path = os.path.join(exp_dir, "test_metrics.json")
@@ -498,18 +503,27 @@ def build_model_ablation_rows(
 def save_model_ablation_tables(
     model_name: str,
     results_root: str = "results",
+    experiments: list = None,
 ) -> None:
     """
     Build + save the ablation comparison tables for a single model.
 
-    The ablation_test_metrics.csv / ablation_cv_metrics.csv contain exactly
-    seven rows (Raw, MI, MI+KMeansSMOTE, PCA, PCA+KMeansSMOTE, MI+PCA,
-    MI+PCA+KMeansSMOTE) once all seven experiments have completed.
+    The ablation_test_metrics.csv / ablation_cv_metrics.csv contain one row
+    per experiment in the model's canonical set.  For Tier 1 models (HGB,
+    XGBoost, LogReg) and DNN that is the full seven-experiment ablation
+    (Raw, MI, MI+KMeansSMOTE, PCA, PCA+KMeansSMOTE, MI+PCA,
+    MI+PCA+KMeansSMOTE); DNN_MI_PCA_KMeans aggregates its four presets
+    (Raw, MI, PCA, MI+PCA).
     """
     from src.experiment_config import ABLATION_ORDER, ABLATION_DISPLAY_NAMES
 
-    summary_rows, cv_rows = build_model_ablation_rows(model_name, results_root)
-    modes = [ABLATION_DISPLAY_NAMES[e] for e in ABLATION_ORDER]
+    if experiments is None:
+        experiments = ABLATION_ORDER
+
+    summary_rows, cv_rows = build_model_ablation_rows(
+        model_name, results_root, experiments=experiments
+    )
+    modes = [ABLATION_DISPLAY_NAMES[e] for e in experiments]
     save_ablation_tables(
         summary_rows, cv_rows,
         results_dir=os.path.join(results_root, model_name),

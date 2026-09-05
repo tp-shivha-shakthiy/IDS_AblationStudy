@@ -1,0 +1,5 @@
+Model,Experiment,Preprocessing,MI,PCA,KMeansSMOTE,cv_accuracy,cv_precision,cv_recall,cv_f1,cv_auc
+DNN_MI_PCA_KMeans,Raw,Raw,No,No,No,0.9795,0.9788,0.9795,0.9761,0.9995
+DNN_MI_PCA_KMeans,MI,MI,Yes,No,No,0.9786,0.9771,0.9786,0.9751,0.9994
+DNN_MI_PCA_KMeans,PCA,PCA,No,Yes,No,0.9787,0.9768,0.9787,0.9751,0.9995
+DNN_MI_PCA_KMeans,MI+PCA,MI+PCA,Yes,Yes,No,0.9781,0.9759,0.9781,0.9746,0.9994

@@ -263,6 +263,20 @@ ABLATION_DISPLAY_NAMES = {
     "mi_pca_balancing": "MI+PCA+KMeansSMOTE",
 }
 
+# ---------------------------------------------------------------------------
+# Canonical model → experiment sets
+# ---------------------------------------------------------------------------
+# Source of truth for `--aggregate-ablation`.  DNN_MI_PCA_KMeans runs only the
+# four preprocessing presets (raw, mi, pca, mi_pca); the KMeansSMOTE balancing
+# presets were not generated for it, so they are not part of its canonical set.
+CANONICAL_MODEL_EXPERIMENTS = {
+    "HGB": list(ABLATION_ORDER),
+    "XGBoost": list(ABLATION_ORDER),
+    "LogReg": list(ABLATION_ORDER),
+    "DNN": list(ABLATION_ORDER),
+    "DNN_MI_PCA_KMeans": ["raw", "mi", "pca", "mi_pca"],
+}
+
 
 def resolve_experiment(experiment: str) -> dict:
     """Return the (use_mi, use_pca, use_balancing) flags for an ablation preset."""

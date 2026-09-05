@@ -26,17 +26,18 @@ Usage
   python main.py                        # default: mi_pca_balancing experiment
   python main.py --data-dir /path/csv   # custom raw data path
   python main.py --experiment raw       # ablation preset (7 available)
-   python main.py --aggregate-ablation    # validate and build final 7-row tables
-   python main.py --quick 200000          # verify pipeline on a stratified sample
-  python main.py --skip-plots            # skip matplotlib output
+  python main.py --aggregate-ablation   # validate and build final ablation tables
+  python main.py --quick 200000         # verify pipeline on a stratified sample
+  python main.py --skip-plots           # skip matplotlib output
 
-The DL models (Tier 2) run the same seven ablation presets through their
-own trainers and write into the same results/<Model>/<experiment>/ layout:
-  python models/train_dnn.py --experiment raw
-  python models/train_lstm.py --experiment mi_pca_balancing   # etc.
-Once all experiments for every model exist, --aggregate-ablation emits the
-comparison tables for HGB, XGBoost, LogReg, DNN, LSTM, BiLSTM,
-BiLSTM_SharedFE, and DNN_MI_PCA_KMeans.
+The DL models (Tier 2) run their ablation presets through their own
+trainers and write into the same results/<Model>/<experiment>/ layout:
+  python models/train_dnn.py --experiment mi_pca_balancing
+  python models/train_dnn_mi_pca_kmeans.py --experiment mi_pca
+Once the canonical experiments for every Tier 1 / Tier 2 model exist,
+--aggregate-ablation emits the comparison tables.  Canonical models:
+HGB, XGBoost, LogReg, DNN (seven presets each) and DNN_MI_PCA_KMeans
+(four presets: raw, mi, pca, mi_pca).
 """
 
 import argparse
@@ -68,6 +69,7 @@ from src.evaluation               import (
 from src.experiment_config        import (
     ABLATION_PRESETS,
     ABLATION_DISPLAY_NAMES,
+    CANONICAL_MODEL_EXPERIMENTS,
     OFFICIAL_RUS_CAP,
     resolve_experiment,
     save_experiment_config,
@@ -95,7 +97,7 @@ def parse_args():
     )
     parser.add_argument(
         '--aggregate-ablation', action='store_true',
-        help='Validate all seven experiments and generate final ablation tables'
+        help='Validate all canonical experiments and generate final ablation tables'
     )
     parser.add_argument(
         '--skip-plots', action='store_true',
@@ -123,15 +125,13 @@ def main():
     args = parse_args()
 
     if args.aggregate_ablation:
-        model_names = (
-            'HGB', 'XGBoost', 'LogReg',
-            'DNN', 'LSTM', 'BiLSTM', 'BiLSTM_SharedFE', 'DNN_MI_PCA_KMeans',
-        )
-        # Validate every model before writing any table for this aggregation run.
-        for name in model_names:
-            build_model_ablation_rows(name, experiments_root="results")
-        for name in model_names:
-            save_model_ablation_tables(name, results_root="results")
+        # Validate every canonical model before writing any table for this run.
+        for name, experiments in CANONICAL_MODEL_EXPERIMENTS.items():
+            build_model_ablation_rows(name, experiments_root="results",
+                                      experiments=experiments)
+        for name, experiments in CANONICAL_MODEL_EXPERIMENTS.items():
+            save_model_ablation_tables(name, results_root="results",
+                                       experiments=experiments)
         print("\nAblation comparison tables generated.")
         return
 
