@@ -1,0 +1,8 @@
+# Tested deserialization environment for the persisted Tier 1 estimators.
+# sklearn 1.6.1 is recorded in the estimator pickle state; XGBoost 3.2.0 is
+# recorded in the serialized Booster configuration. Do not use newer versions
+# to load these artifacts.
+-r requirements.txt
+scikit-learn==1.6.1
+xgboost==3.2.0
+joblib==1.4.2

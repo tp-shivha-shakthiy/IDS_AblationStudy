@@ -17,6 +17,7 @@ from pathlib import Path
 
 import joblib
 import numpy as np
+import sklearn
 
 from src.dimensionality_reduction import split_data
 from src.evaluation import compute_extended_metrics
@@ -26,11 +27,37 @@ from src.preprocessing import load_and_prepare, transform_features
 
 MODEL_NAMES = ("HGB", "XGBoost", "LogReg", "DNN", "DNN_MI_PCA_KMeans")
 CLASSICAL_MODELS = frozenset(("HGB", "XGBoost", "LogReg"))
+SERIALIZED_SKLEARN_VERSION = "1.6.1"
+SERIALIZED_XGBOOST_VERSION = "3.2.0"
 
 
 def model_artifact_name(model_name: str) -> str:
     """Return the canonical final-model filename written by the trainers."""
     return f"{model_name.lower()}_model.joblib"
+
+
+def validate_deserialization_environment(ready: list[tuple[str, str]]) -> None:
+    """Fail before data loading when the persisted estimator ABI is incompatible."""
+    errors = []
+    if sklearn.__version__ != SERIALIZED_SKLEARN_VERSION:
+        errors.append(
+            f"scikit-learn {SERIALIZED_SKLEARN_VERSION} is required; "
+            f"found {sklearn.__version__}."
+        )
+    if any(model_name == "XGBoost" for model_name, _ in ready):
+        import xgboost
+
+        if xgboost.__version__ != SERIALIZED_XGBOOST_VERSION:
+            errors.append(
+                f"XGBoost {SERIALIZED_XGBOOST_VERSION} is required; "
+                f"found {xgboost.__version__}."
+            )
+    if errors:
+        details = "\n".join(f"  - {error}" for error in errors)
+        raise SystemExit(
+            "Saved model artifacts must be evaluated in their compatible environment.\n"
+            f"{details}\nInstall requirements-evaluation.txt in a dedicated environment."
+        )
 
 
 def artifact_status(results_root: Path, model_name: str, experiment: str) -> dict:
@@ -235,6 +262,8 @@ def main() -> None:
     if not ready:
         details = "\n".join(f"  - {message}" for message in skipped)
         raise SystemExit(f"No models were eligible for test-only evaluation:\n{details}")
+
+    validate_deserialization_environment(ready)
 
     # Reconstruct the same split used by training before applying any fitted artifact.
     X_raw, y_all, source_label_encoder = load_and_prepare(args.data_dir)
