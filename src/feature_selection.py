@@ -16,6 +16,7 @@ Provides:
 
 import numpy as np
 import gc
+from functools import partial
 from sklearn.feature_selection import mutual_info_classif, SelectKBest
 from sklearn.model_selection import train_test_split
 
@@ -26,6 +27,8 @@ def fit_mi_selector(
     k: int = 15,
     sample_frac: float = 0.0,
     random_state: int = 42,
+    discrete_features: np.ndarray | None = None,
+    n_neighbors: int = 3,
 ) -> SelectKBest:
     """
     Fit a SelectKBest selector using Mutual Information scores.
@@ -51,8 +54,23 @@ def fit_mi_selector(
     else:
         X_fit, y_fit = X, y
 
-    selector = SelectKBest(score_func=mutual_info_classif, k=min(k, X_fit.shape[1]))
+    if discrete_features is None:
+        discrete_features = np.zeros(X_fit.shape[1], dtype=bool)
+    discrete_features = np.asarray(discrete_features, dtype=bool)
+    if discrete_features.shape != (X_fit.shape[1],):
+        raise ValueError("discrete_features must align with X columns.")
+    score_func = partial(
+        mutual_info_classif,
+        discrete_features=discrete_features,
+        random_state=random_state,
+        n_neighbors=n_neighbors,
+    )
+    selector = SelectKBest(score_func=score_func, k=min(k, X_fit.shape[1]))
     selector.fit(X_fit, y_fit)
+    selector.feature_type_mask_ = discrete_features
+    selector.selected_feature_indices_ = selector.get_support(indices=True)
+    selector.mi_random_state_ = random_state
+    selector.mi_n_neighbors_ = n_neighbors
 
     if sample_frac > 0 and sample_frac < 1.0:
         del X_fit, y_fit

@@ -43,7 +43,8 @@ from sklearn.metrics import (accuracy_score, f1_score, precision_score,
                              ConfusionMatrixDisplay)
 
 from src.feature_selection import fit_mi_selector
-from src.preprocessing import fit_categorical_encoder, transform_features
+from src.preprocessing import fit_categorical_encoder, transform_features, feature_type_mask, feature_metadata
+from src.evaluation import normal_attack_labels, attack_probabilities
 from src.balancing import balance_training_fold
 from src.experiment_config import save_experiment_config
 
@@ -160,10 +161,16 @@ def preprocess_fold(
         categorical_encoder = fit_categorical_encoder(X_tr)
         X_tr = transform_features(X_tr, categorical_encoder)
         X_val = transform_features(X_val, categorical_encoder)
+        discrete_mask = feature_type_mask()
+    else:
+        discrete_mask = np.zeros(X_tr.shape[1], dtype=bool)
 
     # 1. MI Feature Selection (fit on fold train only)
     if use_mi and mi_k > 0:
-        selector = fit_mi_selector(X_tr, y_tr, k=mi_k, random_state=random_state)
+        selector = fit_mi_selector(
+            X_tr, y_tr, k=mi_k, random_state=random_state,
+            discrete_features=discrete_mask,
+        )
         X_tr = selector.transform(X_tr)
         X_val = selector.transform(X_val)
 
@@ -248,10 +255,16 @@ def preprocess_final(
         categorical_encoder = fit_categorical_encoder(X_train)
         X_train = transform_features(X_train, categorical_encoder)
         X_test = transform_features(X_test, categorical_encoder)
+        discrete_mask = feature_type_mask()
+    else:
+        discrete_mask = np.zeros(X_train.shape[1], dtype=bool)
 
     # 1. MI (fit on full training only)
     if use_mi and mi_k > 0:
-        selector = fit_mi_selector(X_train, y_train, k=mi_k, random_state=random_state)
+        selector = fit_mi_selector(
+            X_train, y_train, k=mi_k, random_state=random_state,
+            discrete_features=discrete_mask,
+        )
         X_train = selector.transform(X_train)
         X_test = selector.transform(X_test)
 
@@ -313,10 +326,19 @@ def compute_class_weights(y_train: np.ndarray, device: torch.device) -> torch.Te
 # Evaluation
 # ---------------------------------------------------------------------------
 
+def _require_normal_class_idx(normal_class_idx: int | None) -> int:
+    if normal_class_idx is None:
+        raise ValueError(
+            "normal_class_idx is required for Normal/Attack metrics; resolve it "
+            "from semantic class metadata before calling this function."
+        )
+    return normal_class_idx
+
+
 def evaluate_predictions(
     y_true: np.ndarray,
     y_pred: np.ndarray,
-    normal_class_idx: int = 0,
+    normal_class_idx: int | None = None,
 ) -> dict:
     """
     Compute binary + multiclass metrics.
@@ -325,12 +347,19 @@ def evaluate_predictions(
         binary_acc, binary_f1, multi_acc, macro_f1, weighted_f1,
         precision, recall, auc, accuracy, f1, binary_auc
     """
-    y_true_bin = (y_true != normal_class_idx).astype(int)
-    y_pred_bin = (y_pred != normal_class_idx).astype(int)
+    if normal_class_idx is None:
+        binary_metrics = {'binary_acc': 0.0, 'binary_f1': 0.0}
+    else:
+        normal_class_idx = _require_normal_class_idx(normal_class_idx)
+        y_true_bin = normal_attack_labels(y_true, normal_class_idx)
+        y_pred_bin = normal_attack_labels(y_pred, normal_class_idx)
+        binary_metrics = {
+            'binary_acc': accuracy_score(y_true_bin, y_pred_bin),
+            'binary_f1': f1_score(y_true_bin, y_pred_bin, average='binary', zero_division=0),
+        }
 
     metrics = {
-        'binary_acc': accuracy_score(y_true_bin, y_pred_bin),
-        'binary_f1': f1_score(y_true_bin, y_pred_bin, average='binary', zero_division=0),
+        **binary_metrics,
         'multi_acc': accuracy_score(y_true, y_pred),
         'accuracy': accuracy_score(y_true, y_pred),
         'macro_f1': f1_score(y_true, y_pred, average='macro', zero_division=0),
@@ -359,7 +388,7 @@ def evaluate_with_proba(
     y_true: np.ndarray,
     y_pred: np.ndarray,
     y_proba: np.ndarray,
-    normal_class_idx: int = 0,
+    normal_class_idx: int | None = None,
 ) -> dict:
     """Compute metrics including AUC when probabilities are available."""
     metrics = evaluate_predictions(y_true, y_pred, normal_class_idx)
@@ -371,9 +400,13 @@ def evaluate_with_proba(
     except Exception:
         metrics['auc'] = 0.0
     try:
-        y_true_bin = (y_true != normal_class_idx).astype(int)
-        p_attack = 1.0 - np.asarray(y_proba)[:, normal_class_idx]
-        metrics['binary_auc'] = roc_auc_score(y_true_bin, p_attack)
+        if normal_class_idx is not None:
+            normal_class_idx = _require_normal_class_idx(normal_class_idx)
+            y_true_bin = normal_attack_labels(y_true, normal_class_idx)
+            p_attack = attack_probabilities(y_proba, normal_class_idx)
+            metrics['binary_auc'] = roc_auc_score(y_true_bin, p_attack)
+        else:
+            metrics['binary_auc'] = 0.0
     except Exception:
         metrics['binary_auc'] = 0.0
     return metrics
@@ -420,6 +453,7 @@ def save_dl_artifacts(
     scaler=None,
     pca=None,
     le=None,
+    categorical_encoder=None,
     config: dict = None,
 ):
     """
@@ -505,12 +539,26 @@ def save_dl_artifacts(
     # Preprocessing artifacts (for inference reproducibility)
     if selector is not None:
         joblib.dump(selector, os.path.join(save_dir, "mi_selector.joblib"))
+        with open(os.path.join(save_dir, "mi_metadata.json"), "w") as f:
+            json.dump({
+                "selected_indices": selector.selected_feature_indices_.tolist(),
+                "selected_feature_names": [feature_metadata()["feature_names"][i]
+                                           for i in selector.selected_feature_indices_],
+                "scores": selector.scores_.tolist(),
+                "discrete_mask": selector.feature_type_mask_.tolist(),
+                "k": selector.k,
+                "random_state": selector.mi_random_state_,
+            }, f, indent=2)
     if scaler is not None:
         joblib.dump(scaler, os.path.join(save_dir, "scaler.joblib"))
     if pca is not None:
         joblib.dump(pca, os.path.join(save_dir, "pca.joblib"))
     if le is not None:
         joblib.dump(le, os.path.join(save_dir, "label_encoder.joblib"))
+    if categorical_encoder is not None:
+        joblib.dump(categorical_encoder, os.path.join(save_dir, "categorical_encoder.joblib"))
+    with open(os.path.join(save_dir, "preprocessing_manifest.json"), "w") as f:
+        json.dump(feature_metadata(), f, indent=2, default=lambda value: value.tolist())
 
     # Config JSON (canonical name, written via the shared config writer)
     if config is None:

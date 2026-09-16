@@ -267,9 +267,10 @@ class TestTrainAndEvaluateExperiment:
 
         with open(os.path.join(exp_dir, "test_metrics.json")) as f:
             tm = json.load(f)
-        for key in ["accuracy", "macro_f1", "weighted_f1",
-                    "binary_acc", "binary_f1", "binary_auc", "auc"]:
+        for key in ["accuracy", "precision", "recall", "f1", "auc"]:
             assert key in tm, f"Missing extended metric: {key}"
+        for key in ["binary_acc", "binary_f1", "binary_auc"]:
+            assert key not in tm, "Synthetic classes cannot resolve Normal semantics."
 
         with open(os.path.join(exp_dir, "experiment_config.json")) as f:
             cfg = json.load(f)

@@ -1,5 +1,5 @@
 """
-train_Bi-LSTM.py
+train_bilstm.py
 ================
 Weighted Bidirectional LSTM — participates in the seven-preset ablation.
 
@@ -212,6 +212,7 @@ def main(data_dir="data/raw", experiment="mi_pca_balancing", cap=OFFICIAL_RUS_CA
         selector=final_data['selector'],
         scaler=final_data['scaler'],
         pca=final_data['pca'],
+        categorical_encoder=final_data['categorical_encoder'],
         le=data['le'],
         config=build_experiment_config(
             model_name=MODEL_NAME,

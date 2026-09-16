@@ -95,10 +95,10 @@ INTRUSION-DETECTION-SYSTEM/
 │
 ├── models/                              Deep learning training scripts (Tier 2)
 │   ├── train_dnn.py                     DNN (canonical ablation model)
-│   ├── train_dnn_mi_pca_kmeans.py       DNN + MI + PCA + KMeansSMOTE (canonical)
-│   ├── train_LSTM.py                    Bi-LSTM — legacy (not in canonical study)
-│   ├── train_Bi-LSTM.py                 Weighted Bi-LSTM — legacy (not in canonical study)
-│   └── train_Bi-LSTM_shared-feature-extractor.py  Multi-task DNN — legacy (not in canonical study)
+│   ├── train_dnn_feature_ablation.py    DNN + MI + PCA + KMeansSMOTE (canonical)
+│   ├── train_lstm.py                    Bi-LSTM — legacy (not in canonical study)
+│   ├── train_bilstm.py                  Weighted Bi-LSTM — legacy (not in canonical study)
+│   └── train_bilstm_shared_feature.py   Multi-task DNN — legacy (not in canonical study)
 │
 ├── tests/
 │   ├── test_leakage.py                  Leakage verification + regression
@@ -224,10 +224,10 @@ Each DL script follows the same leakage-free protocol as Tier 1.
 | Script | Architecture | Preprocessing |
 |---|---|---|
 | `train_dnn.py` | 2-layer DNN (64→32) + BatchNorm + Dropout(0.1) | Seven ablation presets (MI k=15, PCA 95%, KMeansSMOTE cap=15000) |
-| `train_dnn_mi_pca_kmeans.py` | 3-layer DNN (128→64→32) + BatchNorm + Dropout(0.2) | Four ablation presets: Raw, MI, PCA, MI+PCA (KMeansSMOTE intrinsic) |
-| `train_LSTM.py` | Bi-LSTM (hidden=32, 1 layer) + FC(32→out) | Legacy — not part of canonical study |
-| `train_Bi-LSTM.py` | Weighted Bi-LSTM (hidden=32) + FC(32→out) | Legacy — not part of canonical study |
-| `train_Bi-LSTM_shared-feature-extractor.py` | Multi-task DNN: shared backbone (128→64), binary + multi-class heads | Legacy — not part of canonical study |
+| `train_dnn_feature_ablation.py` | 3-layer DNN (128→64→32) + BatchNorm + Dropout(0.2) | Four ablation presets: Raw, MI, PCA, MI+PCA (KMeansSMOTE intrinsic) |
+| `train_lstm.py` | Bi-LSTM (hidden=32, 1 layer) + FC(32→out) | Legacy — not part of canonical study |
+| `train_bilstm.py` | Weighted Bi-LSTM (hidden=32) + FC(32→out) | Legacy — not part of canonical study |
+| `train_bilstm_shared_feature.py` | Multi-task DNN: shared backbone (128→64), binary + multi-class heads | Legacy — not part of canonical study |
 
 ---
 
@@ -257,14 +257,14 @@ python main.py
 
 ### 4. Run Tier 2 (DL models)
 
-Each model runs independently. The canonical Tier 2 models are `train_dnn.py` (all seven presets) and `train_dnn_mi_pca_kmeans.py` (raw, mi, pca, mi_pca):
+Each model runs independently. The canonical Tier 2 models are `train_dnn.py` (all seven presets) and `train_dnn_feature_ablation.py` (raw, mi, pca, mi_pca):
 
 ```bash
 python models/train_dnn.py
-python models/train_dnn_mi_pca_kmeans.py
+python models/train_dnn_feature_ablation.py
 ```
 
-The legacy LSTM-family trainers (`train_LSTM.py`, `train_Bi-LSTM.py`, `train_Bi-LSTM_shared-feature-extractor.py`) are retained as exploratory code but are **not** part of the canonical study.
+The legacy LSTM-family trainers (`train_lstm.py`, `train_bilstm.py`, `train_bilstm_shared_feature.py`) are retained as exploratory code but are **not** part of the canonical study.
 
 All DL scripts accept `--data-dir` for custom data paths:
 

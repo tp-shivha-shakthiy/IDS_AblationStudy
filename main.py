@@ -33,7 +33,7 @@ Usage
 The DL models (Tier 2) run their ablation presets through their own
 trainers and write into the same results/<Model>/<experiment>/ layout:
   python models/train_dnn.py --experiment mi_pca_balancing
-  python models/train_dnn_mi_pca_kmeans.py --experiment mi_pca
+  python models/train_dnn_feature_ablation.py --experiment mi_pca
 Once the canonical experiments for every Tier 1 / Tier 2 model exist,
 --aggregate-ablation emits the comparison tables.  Canonical models:
 HGB, XGBoost, LogReg, DNN (seven presets each) and DNN_MI_PCA_KMeans
@@ -151,6 +151,7 @@ def main():
     # ------------------------------------------------------------------
     X_raw, y_multi, le = load_and_prepare(data_dir=args.data_dir)
     class_names = list(le.classes_)
+    normal_class_idx = class_names.index("Normal")
 
     if args.quick > 0 and args.quick < X_raw.shape[0]:
         from sklearn.model_selection import train_test_split
@@ -191,6 +192,7 @@ def main():
         use_pca=use_pca,
         use_balancing=use_balancing,
         experiment=experiment,
+        normal_class_idx=normal_class_idx,
     )
     print(f"  [main] HGB completed in {time.time()-t0:.1f}s")
 
@@ -210,6 +212,7 @@ def main():
         use_pca=use_pca,
         use_balancing=use_balancing,
         experiment=experiment,
+        normal_class_idx=normal_class_idx,
     )
     print(f"  [main] XGBoost completed in {time.time()-t0:.1f}s")
 
@@ -229,6 +232,7 @@ def main():
         use_pca=use_pca,
         use_balancing=use_balancing,
         experiment=experiment,
+        normal_class_idx=normal_class_idx,
     )
     print(f"  [main] LogReg completed in {time.time()-t0:.1f}s")
 

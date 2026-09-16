@@ -29,7 +29,7 @@ from sklearn.metrics import (precision_score, recall_score, f1_score,
 from src.cross_validation import run_cv
 from src.balancing import balance_full_train
 from src.feature_selection import fit_mi_selector
-from src.preprocessing import fit_categorical_encoder, transform_features
+from src.preprocessing import fit_categorical_encoder, transform_features, feature_type_mask, feature_metadata
 from src.evaluation import (plot_confusion_matrix, plot_roc_curve,
                             plot_feature_importance, compute_extended_metrics)
 from src.experiment_config import build_experiment_config, save_experiment_config
@@ -140,6 +140,7 @@ def train_and_evaluate(
     use_pca: bool = True,
     use_balancing: bool = True,
     experiment: str = "mi_pca_balancing",
+    normal_class_idx: int = None,
 ) -> dict:
     """
     Full Tier 1 pipeline for any model in MODEL_REGISTRY.
@@ -210,11 +211,16 @@ def train_and_evaluate(
         categorical_encoder = fit_categorical_encoder(X_train)
         X_train = transform_features(X_train, categorical_encoder)
         X_test = transform_features(X_test, categorical_encoder)
+        discrete_mask = feature_type_mask()
     else:
         categorical_encoder = None
+        discrete_mask = np.zeros(X_train.shape[1], dtype=bool)
 
     if use_mi:
-        selector = fit_mi_selector(X_train, y_train, k=mi_k, random_state=random_state)
+        selector = fit_mi_selector(
+            X_train, y_train, k=mi_k, random_state=random_state,
+            discrete_features=discrete_mask,
+        )
         X_train_mi = selector.transform(X_train)
         X_test_mi = selector.transform(X_test)
         print(f"    MI selected: {X_train_mi.shape[1]} features")
@@ -259,10 +265,13 @@ def train_and_evaluate(
         y_proba = model.predict_proba(X_test_p)
     except Exception:
         y_proba = None
-    extended = compute_extended_metrics(
-        y_test, y_test_pred, y_proba=y_proba, normal_class_idx=0,
-    )
-    test_metrics.update(extended)
+    if normal_class_idx is None and "Normal" in class_names:
+        normal_class_idx = class_names.index("Normal")
+    if normal_class_idx is not None:
+        extended = compute_extended_metrics(
+            y_test, y_test_pred, y_proba=y_proba, normal_class_idx=normal_class_idx,
+        )
+        test_metrics.update(extended)
 
     print(f"\n  {model_name} Test Metrics:")
     for k, v in test_metrics.items():
@@ -278,10 +287,24 @@ def train_and_evaluate(
 
     if selector is not None:
         joblib.dump(selector, os.path.join(save_dir, "mi_selector.joblib"))
+        with open(os.path.join(save_dir, "mi_metadata.json"), "w") as f:
+            json.dump({
+                "selected_indices": selector.selected_feature_indices_.tolist(),
+                "selected_feature_names": [feature_metadata()["feature_names"][i]
+                                           for i in selector.selected_feature_indices_],
+                "scores": selector.scores_.tolist(),
+                "discrete_mask": selector.feature_type_mask_.tolist(),
+                "k": selector.k,
+                "random_state": selector.mi_random_state_,
+            }, f, indent=2)
     if scaler is not None:
         joblib.dump(scaler, os.path.join(save_dir, "scaler.joblib"))
     if pca is not None:
         joblib.dump(pca, os.path.join(save_dir, "pca.joblib"))
+    if categorical_encoder is not None:
+        joblib.dump(categorical_encoder, os.path.join(save_dir, "categorical_encoder.joblib"))
+    with open(os.path.join(save_dir, "preprocessing_manifest.json"), "w") as f:
+        json.dump(feature_metadata(), f, indent=2, default=lambda value: value.tolist())
 
     config = build_experiment_config(
         model_name=model_name,
@@ -313,7 +336,7 @@ def train_and_evaluate(
 
     plot_confusion_matrix(
         y_test, y_test_pred, class_names,
-        normal_class_idx=0, save_dir=save_dir,
+        normal_class_idx=normal_class_idx, save_dir=save_dir,
         prefix=f"{model_name.lower()}_",
     )
     plot_roc_curve(

@@ -25,17 +25,21 @@ from sklearn.preprocessing import LabelEncoder, OrdinalEncoder
 # Constants
 # ---------------------------------------------------------------------------
 
-COL_NAMES = [
+RAW_COLUMNS = [
     'srcip', 'sport', 'dstip', 'dsport', 'proto', 'state', 'dur', 'sbytes',
     'dbytes', 'sttl', 'dttl', 'sloss', 'dloss', 'service', 'sload', 'dload',
     'spkts', 'dpkts', 'swin', 'dwin', 'stcpb', 'dtcpb', 'smeansz', 'dmeansz',
-    'trans_depth', 'res_bdy_len', 'sjit', 'djit', 'sintpkt', 'dintpkt',
-    'tcprtt', 'synack', 'ackdat', 'is_sm_ips_ports', 'ct_src_ltm',
-    'ct_dst_ltm', 'ct_src_dport_ltm', 'ct_dst_sport_ltm', 'ct_dst_src_ltm',
-    'is_ftp_login', 'ct_ftp_cmd', 'ct_flw_http_mthd', 'ct_src_ltm_d',
-    'ct_srv_dst', 'ct_state_ttl', 'ct_src_user_ltm', 'ct_src_zone_ltm',
-    'ct_dst_host_ltm', 'ct_srv_src', 'attack_cat', 'label',
+    'trans_depth', 'res_bdy_len', 'sjit', 'djit', 'stime', 'ltime',
+    'sintpkt', 'dintpkt',
+    'tcprtt', 'synack', 'ackdat', 'is_sm_ips_ports', 'ct_state_ttl',
+    'ct_flw_http_mthd', 'is_ftp_login', 'ct_ftp_cmd', 'ct_srv_src',
+    'ct_srv_dst', 'ct_dst_ltm', 'ct_src_ltm', 'ct_src_dport_ltm',
+    'ct_dst_sport_ltm', 'ct_dst_src_ltm', 'attack_cat', 'label',
 ]
+
+SCHEMA_VERSION = "unsw_nb15_raw_49_v1"
+EXPECTED_RAW_COLUMNS = 49
+CATEGORICAL_COLUMNS = ('proto', 'state', 'service')
 
 CATEGORY_MAPPING = {
     'normal': 'Normal',
@@ -59,6 +63,20 @@ TARGET_CLASSES = (
 
 DROP_COLS = ['id', 'label', 'stime', 'ltime', 'srcip', 'dstip']
 TARGET_COL = 'attack_cat'
+
+
+def feature_columns() -> list[str]:
+    """Return the canonical ordered model feature names after intentional drops."""
+    return [name for name in RAW_COLUMNS if name not in {*DROP_COLS, TARGET_COL}]
+
+
+FEATURE_COLUMNS = feature_columns()
+NUMERIC_COLUMNS = tuple(name for name in FEATURE_COLUMNS if name not in CATEGORICAL_COLUMNS)
+
+if len(RAW_COLUMNS) != EXPECTED_RAW_COLUMNS or len(set(RAW_COLUMNS)) != EXPECTED_RAW_COLUMNS:
+    raise RuntimeError("UNSW-NB15 raw schema must contain 49 unique columns.")
+if not set(CATEGORICAL_COLUMNS).issubset(FEATURE_COLUMNS):
+    raise RuntimeError("Categorical schema fields must be model features.")
 
 
 # ---------------------------------------------------------------------------
@@ -95,10 +113,12 @@ def load_and_prepare(data_dir: str = "data/raw") -> tuple:
             print(f"  Loading {fname} ...")
             df_temp = pd.read_csv(fname, header=None, low_memory=False)
 
-            if df_temp.shape[1] == 49:
-                df_temp.columns = COL_NAMES[:47] + ['attack_cat', 'label']
-            else:
-                df_temp.columns = COL_NAMES[:df_temp.shape[1]]
+            if df_temp.shape[1] != EXPECTED_RAW_COLUMNS:
+                raise ValueError(
+                    f"{fname} has {df_temp.shape[1]} columns; expected "
+                    f"{EXPECTED_RAW_COLUMNS} for schema {SCHEMA_VERSION}."
+                )
+            df_temp.columns = RAW_COLUMNS
 
             df_list.append(df_temp)
         except FileNotFoundError:
@@ -143,7 +163,9 @@ def load_and_prepare(data_dir: str = "data/raw") -> tuple:
     # 4. Keep remaining categorical columns unencoded.  Their encoder is fit
     # after the holdout split, using training data only.
     # ------------------------------------------------------------------
-    cat_cols = X_raw.select_dtypes(include=['object']).columns.tolist()
+    if list(X_raw.columns) != FEATURE_COLUMNS:
+        raise RuntimeError("Post-drop UNSW feature order does not match canonical schema.")
+    cat_cols = list(CATEGORICAL_COLUMNS)
     print(f"  Categorical features deferred until post-split encoding: {cat_cols}")
     print(f"  Pre-split preparation complete. Feature matrix shape: {X_raw.shape}")
     return X_raw, y_multi, le
@@ -152,11 +174,7 @@ def load_and_prepare(data_dir: str = "data/raw") -> tuple:
 def fit_categorical_encoder(X_train: pd.DataFrame):
     """Fit an unknown-safe categorical encoder on training features only."""
     # pandas 3.x stores strings as 'str' (StringDtype) or legacy 'object'.
-    cat_cols = X_train.select_dtypes(
-        include=['object', 'string']
-    ).columns.tolist()
-    if not cat_cols:
-        return None
+    cat_cols = [name for name in CATEGORICAL_COLUMNS if name in X_train.columns]
 
     encoder = OrdinalEncoder(
         handle_unknown='use_encoded_value', unknown_value=-1,
@@ -166,7 +184,11 @@ def fit_categorical_encoder(X_train: pd.DataFrame):
     return encoder
 
 
-def transform_features(X: pd.DataFrame, categorical_encoder) -> np.ndarray:
+def transform_features(
+    X: pd.DataFrame,
+    categorical_encoder,
+    preserve_categorical_codes: bool = False,
+) -> np.ndarray:
     """Encode with a train-fitted encoder, then apply deterministic transforms."""
     X_out = X.copy()
     if categorical_encoder is not None:
@@ -182,9 +204,43 @@ def transform_features(X: pd.DataFrame, categorical_encoder) -> np.ndarray:
         )[X_out.columns]
 
     X_out = X_out.apply(pd.to_numeric, errors='coerce')
-    return (
-        np.log1p(X_out.clip(lower=0))
-        .fillna(0)
-        .astype('float32')
-        .values
-    )
+    if preserve_categorical_codes and categorical_encoder is not None:
+        # MI's discrete branch requires the ordinal category codes themselves,
+        # not their log-transformed continuous values.
+        numeric_cols = X_out.columns.difference(categorical_encoder.feature_names_in_)
+        X_out[numeric_cols] = np.log1p(X_out[numeric_cols].clip(lower=0))
+        X_values = X_out.fillna(0).astype('float32').values
+    else:
+        X_values = (
+            np.log1p(X_out.clip(lower=0))
+            .fillna(0)
+            .astype('float32')
+            .values
+        )
+    if list(X.columns) == FEATURE_COLUMNS and X_values.shape[1] != len(FEATURE_COLUMNS):
+        raise RuntimeError("Transformed canonical feature width does not match schema metadata.")
+    return X_values
+
+
+def feature_type_mask(feature_names: list[str] | None = None) -> np.ndarray:
+    """Boolean MI mask aligned to the supplied transformed feature order."""
+    if feature_names is None:
+        feature_names = FEATURE_COLUMNS
+    return np.asarray([name in CATEGORICAL_COLUMNS for name in feature_names], dtype=bool)
+
+
+def feature_metadata() -> dict:
+    """Return schema-aligned metadata required by MI and raw inference."""
+    mask = feature_type_mask()
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "raw_columns": list(RAW_COLUMNS),
+        "feature_names": list(FEATURE_COLUMNS),
+        "dropped_columns": list(DROP_COLS) + [TARGET_COL],
+        "categorical_columns": list(CATEGORICAL_COLUMNS),
+        "numeric_columns": list(NUMERIC_COLUMNS),
+        "discrete_mask": mask,
+        "discrete_indices": np.flatnonzero(mask).tolist(),
+        "numeric_indices": np.flatnonzero(~mask).tolist(),
+        "unknown_category_policy": "ordinal_unknown_minus_one_then_log1p_zero",
+    }

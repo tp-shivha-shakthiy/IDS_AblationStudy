@@ -29,6 +29,27 @@ from sklearn.metrics import (
 from sklearn.preprocessing import label_binarize
 
 
+def resolve_normal_class_idx(class_names: list[str]) -> int:
+    """Resolve the benign class by semantic name, never by numeric position."""
+    try:
+        return list(class_names).index("Normal")
+    except ValueError as exc:
+        raise ValueError("Class names must contain 'Normal'.") from exc
+
+
+def normal_attack_labels(labels: np.ndarray, normal_class_idx: int) -> np.ndarray:
+    """Map only the semantic Normal class to 0 and every other class to 1."""
+    return np.where(np.asarray(labels) == normal_class_idx, 0, 1)
+
+
+def attack_probabilities(y_proba: np.ndarray, normal_class_idx: int) -> np.ndarray:
+    """Aggregate multiclass probabilities into P(Attack) using Normal's column."""
+    probabilities = np.asarray(y_proba)
+    if probabilities.ndim != 2 or not 0 <= normal_class_idx < probabilities.shape[1]:
+        raise ValueError("normal_class_idx must identify a probability column.")
+    return 1.0 - probabilities[:, normal_class_idx]
+
+
 # ---------------------------------------------------------------------------
 # Confusion Matrices
 # ---------------------------------------------------------------------------
@@ -47,8 +68,8 @@ def plot_confusion_matrix(
     os.makedirs(save_dir, exist_ok=True)
 
     # --- Binary CM ---
-    y_true_bin = np.where(y_true == normal_class_idx, 0, 1)
-    y_pred_bin = np.where(y_pred == normal_class_idx, 0, 1)
+    y_true_bin = normal_attack_labels(y_true, normal_class_idx)
+    y_pred_bin = normal_attack_labels(y_pred, normal_class_idx)
 
     fig, ax = plt.subplots(figsize=(5, 4))
     cm_bin = confusion_matrix(y_true_bin, y_pred_bin, labels=[0, 1])
@@ -555,8 +576,8 @@ def compute_extended_metrics(
         'weighted_f1': f1_score(y_true, y_pred, average='weighted', zero_division=0),
     }
 
-    y_true_bin = np.where(y_true == normal_class_idx, 0, 1)
-    y_pred_bin = np.where(y_pred == normal_class_idx, 0, 1)
+    y_true_bin = normal_attack_labels(y_true, normal_class_idx)
+    y_pred_bin = normal_attack_labels(y_pred, normal_class_idx)
     metrics['binary_acc'] = accuracy_score(y_true_bin, y_pred_bin)
     metrics['binary_f1'] = f1_score(y_true_bin, y_pred_bin, zero_division=0)
 
@@ -568,7 +589,7 @@ def compute_extended_metrics(
         except Exception:
             metrics['auc'] = 0.0
         try:
-            p_attack = 1.0 - np.asarray(y_proba)[:, normal_class_idx]
+            p_attack = attack_probabilities(y_proba, normal_class_idx)
             metrics['binary_auc'] = roc_auc_score(y_true_bin, p_attack)
         except Exception:
             metrics['binary_auc'] = 0.0

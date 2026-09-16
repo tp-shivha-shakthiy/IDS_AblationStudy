@@ -78,7 +78,7 @@ class TestDLModelForwardPass:
 
     def test_dnn_mi_pca_kmeans_output_shape(self):
         """DNN_MI_PCA_KMeans must output correct shape."""
-        from models.train_dnn_mi_pca_kmeans import DeepNeuralNetwork
+        from models.train_dnn_feature_ablation import DeepNeuralNetwork
 
         model = DeepNeuralNetwork(input_dim=15, output_dim=10)
         X = torch.randn(32, 15)
@@ -87,7 +87,7 @@ class TestDLModelForwardPass:
 
     def test_lstm_output_shape(self):
         """BiLSTM must output correct shape."""
-        from models.train_LSTM import BiLSTMNetwork
+        from models.train_lstm import BiLSTMNetwork
 
         model = BiLSTMNetwork(input_dim=15, output_dim=10)
         X = torch.randn(32, 15)
@@ -96,7 +96,7 @@ class TestDLModelForwardPass:
 
     def test_bilstm_output_shape(self):
         """WeightedBiLSTM must output correct shape."""
-        WeightedBiLSTM = _import_hyphenated("train_Bi-LSTM.py", "WeightedBiLSTM")
+        from models.train_bilstm import WeightedBiLSTM
 
         model = WeightedBiLSTM(input_dim=15, output_dim=10)
         X = torch.randn(32, 15)
@@ -105,9 +105,7 @@ class TestDLModelForwardPass:
 
     def test_multi_task_output_shapes(self):
         """MultiTaskHierarchicalDNN must return (binary, multi) outputs."""
-        MultiTaskHierarchicalDNN = _import_hyphenated(
-            "train_Bi-LSTM_shared-feature-extractor.py", "MultiTaskHierarchicalDNN"
-        )
+        from models.train_bilstm_shared_feature import MultiTaskHierarchicalDNN
 
         model = MultiTaskHierarchicalDNN(input_dim=15, num_classes=10)
         X = torch.randn(32, 15)
@@ -160,7 +158,7 @@ class TestDLModelSaveLoad:
 
     def test_lstm_save_load_roundtrip(self):
         """Saved LSTM state_dict must load back identically."""
-        from models.train_LSTM import BiLSTMNetwork
+        from models.train_lstm import BiLSTMNetwork
 
         model = BiLSTMNetwork(input_dim=15, output_dim=5)
         model.eval()
