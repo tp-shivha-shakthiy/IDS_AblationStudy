@@ -1,0 +1,346 @@
+{
+  "features_evaluated": 43,
+  "ranking": [
+    {
+      "rank": 1,
+      "feature_name": "ct_state_ttl",
+      "rho": -0.8410110230337684,
+      "abs_rho": 0.8410110230337684
+    },
+    {
+      "rank": 2,
+      "feature_name": "sttl",
+      "rho": -0.6828164497886134,
+      "abs_rho": 0.6828164497886134
+    },
+    {
+      "rank": 3,
+      "feature_name": "ct_dst_sport_ltm",
+      "rho": -0.47579574911663447,
+      "abs_rho": 0.47579574911663447
+    },
+    {
+      "rank": 4,
+      "feature_name": "state",
+      "rho": -0.44678001833992004,
+      "abs_rho": 0.44678001833992004
+    },
+    {
+      "rank": 5,
+      "feature_name": "dload",
+      "rho": 0.44289266762438295,
+      "abs_rho": 0.44289266762438295
+    },
+    {
+      "rank": 6,
+      "feature_name": "dttl",
+      "rho": 0.4076136175471832,
+      "abs_rho": 0.4076136175471832
+    },
+    {
+      "rank": 7,
+      "feature_name": "ct_src_dport_ltm",
+      "rho": -0.4061474365539377,
+      "abs_rho": 0.4061474365539377
+    },
+    {
+      "rank": 8,
+      "feature_name": "dmeansz",
+      "rho": 0.40428685193368685,
+      "abs_rho": 0.40428685193368685
+    },
+    {
+      "rank": 9,
+      "feature_name": "dbytes",
+      "rho": 0.3942670977800463,
+      "abs_rho": 0.3942670977800463
+    },
+    {
+      "rank": 10,
+      "feature_name": "dpkts",
+      "rho": 0.39133316478263586,
+      "abs_rho": 0.39133316478263586
+    },
+    {
+      "rank": 11,
+      "feature_name": "sbytes",
+      "rho": 0.38710245359884143,
+      "abs_rho": 0.38710245359884143
+    },
+    {
+      "rank": 12,
+      "feature_name": "ct_dst_src_ltm",
+      "rho": -0.3592346390815619,
+      "abs_rho": 0.3592346390815619
+    },
+    {
+      "rank": 13,
+      "feature_name": "dintpkt",
+      "rho": 0.3162588590156334,
+      "abs_rho": 0.3162588590156334
+    },
+    {
+      "rank": 14,
+      "feature_name": "spkts",
+      "rho": 0.3092073734939606,
+      "abs_rho": 0.3092073734939606
+    },
+    {
+      "rank": 15,
+      "feature_name": "dur",
+      "rho": 0.30031217235762353,
+      "abs_rho": 0.30031217235762353
+    },
+    {
+      "rank": 16,
+      "feature_name": "swin",
+      "rho": 0.29720991390510276,
+      "abs_rho": 0.29720991390510276
+    },
+    {
+      "rank": 17,
+      "feature_name": "dwin",
+      "rho": 0.2961341520073432,
+      "abs_rho": 0.2961341520073432
+    },
+    {
+      "rank": 18,
+      "feature_name": "dsport",
+      "rho": 0.29226583209705914,
+      "abs_rho": 0.29226583209705914
+    },
+    {
+      "rank": 19,
+      "feature_name": "dloss",
+      "rho": 0.29141716343030566,
+      "abs_rho": 0.29141716343030566
+    },
+    {
+      "rank": 20,
+      "feature_name": "sloss",
+      "rho": 0.2836622582446814,
+      "abs_rho": 0.2836622582446814
+    },
+    {
+      "rank": 21,
+      "feature_name": "sload",
+      "rho": -0.282102502377683,
+      "abs_rho": 0.282102502377683
+    },
+    {
+      "rank": 22,
+      "feature_name": "ct_srv_src",
+      "rho": -0.2773480891952372,
+      "abs_rho": 0.2773480891952372
+    },
+    {
+      "rank": 23,
+      "feature_name": "ct_srv_dst",
+      "rho": -0.27530131634916943,
+      "abs_rho": 0.27530131634916943
+    },
+    {
+      "rank": 24,
+      "feature_name": "dtcpb",
+      "rho": 0.26209753084811227,
+      "abs_rho": 0.26209753084811227
+    },
+    {
+      "rank": 25,
+      "feature_name": "stcpb",
+      "rho": 0.26192822100814683,
+      "abs_rho": 0.26192822100814683
+    },
+    {
+      "rank": 26,
+      "feature_name": "djit",
+      "rho": 0.260944277934862,
+      "abs_rho": 0.260944277934862
+    },
+    {
+      "rank": 27,
+      "feature_name": "smeansz",
+      "rho": 0.2597212953194604,
+      "abs_rho": 0.2597212953194604
+    },
+    {
+      "rank": 28,
+      "feature_name": "sintpkt",
+      "rho": 0.2511068424261413,
+      "abs_rho": 0.2511068424261413
+    },
+    {
+      "rank": 29,
+      "feature_name": "proto",
+      "rho": -0.24306213559730633,
+      "abs_rho": 0.24306213559730633
+    },
+    {
+      "rank": 30,
+      "feature_name": "ct_src_ltm",
+      "rho": -0.2427713954486174,
+      "abs_rho": 0.2427713954486174
+    },
+    {
+      "rank": 31,
+      "feature_name": "sjit",
+      "rho": 0.22829784367906417,
+      "abs_rho": 0.22829784367906417
+    },
+    {
+      "rank": 32,
+      "feature_name": "ct_dst_ltm",
+      "rho": -0.22757032579012146,
+      "abs_rho": 0.22757032579012146
+    },
+    {
+      "rank": 33,
+      "feature_name": "synack",
+      "rho": 0.20677152867836512,
+      "abs_rho": 0.20677152867836512
+    },
+    {
+      "rank": 34,
+      "feature_name": "tcprtt",
+      "rho": 0.20672660014564914,
+      "abs_rho": 0.20672660014564914
+    },
+    {
+      "rank": 35,
+      "feature_name": "ackdat",
+      "rho": 0.20660732727716133,
+      "abs_rho": 0.20660732727716133
+    },
+    {
+      "rank": 36,
+      "feature_name": "sport",
+      "rho": 0.16450202420739268,
+      "abs_rho": 0.16450202420739268
+    },
+    {
+      "rank": 37,
+      "feature_name": "service",
+      "rho": -0.11376417009033434,
+      "abs_rho": 0.11376417009033434
+    },
+    {
+      "rank": 38,
+      "feature_name": "res_bdy_len",
+      "rho": 0.052270792718193834,
+      "abs_rho": 0.052270792718193834
+    },
+    {
+      "rank": 39,
+      "feature_name": "ct_flw_http_mthd",
+      "rho": 0.03799857804200878,
+      "abs_rho": 0.03799857804200878
+    },
+    {
+      "rank": 40,
+      "feature_name": "trans_depth",
+      "rho": 0.03799412237210626,
+      "abs_rho": 0.03799412237210626
+    },
+    {
+      "rank": 41,
+      "feature_name": "ct_ftp_cmd",
+      "rho": 0.02633325445316679,
+      "abs_rho": 0.02633325445316679
+    },
+    {
+      "rank": 42,
+      "feature_name": "is_ftp_login",
+      "rho": 0.026237696436254333,
+      "abs_rho": 0.026237696436254333
+    },
+    {
+      "rank": 43,
+      "feature_name": "is_sm_ips_ports",
+      "rho": 0.013922121932098274,
+      "abs_rho": 0.013922121932098274
+    }
+  ],
+  "knee_method": "maximum_distance_to_endpoint_chord",
+  "detected_knee": 4,
+  "coefficient_at_knee": 0.44678001833992004,
+  "selected_dimension": 4,
+  "selected_features": [
+    "ct_state_ttl",
+    "sttl",
+    "ct_dst_sport_ltm",
+    "state"
+  ],
+  "largest_adjacent_drops": [
+    {
+      "after_rank": 2,
+      "drop": 0.20702070067197897,
+      "from_abs_rho": 0.6828164497886134,
+      "to_abs_rho": 0.47579574911663447
+    },
+    {
+      "after_rank": 1,
+      "drop": 0.15819457324515496,
+      "from_abs_rho": 0.8410110230337684,
+      "to_abs_rho": 0.6828164497886134
+    },
+    {
+      "after_rank": 37,
+      "drop": 0.0614933773721405,
+      "from_abs_rho": 0.11376417009033434,
+      "to_abs_rho": 0.052270792718193834
+    },
+    {
+      "after_rank": 36,
+      "drop": 0.05073785411705835,
+      "from_abs_rho": 0.16450202420739268,
+      "to_abs_rho": 0.11376417009033434
+    },
+    {
+      "after_rank": 12,
+      "drop": 0.042975780065928504,
+      "from_abs_rho": 0.3592346390815619,
+      "to_abs_rho": 0.3162588590156334
+    }
+  ],
+  "near_zero_tail": {
+    "exact_zero_count": 0,
+    "minimum_abs_rho": 0.013922121932098274,
+    "p10_abs_rho": 0.04085302097724579,
+    "p25_abs_rho": 0.2171709272342433
+  },
+  "nearest_alternative_cutoffs": [
+    {
+      "top_k": 3,
+      "dimension": 3,
+      "cutoff_abs_rho": 0.47579574911663447,
+      "features": [
+        "ct_state_ttl",
+        "sttl",
+        "ct_dst_sport_ltm"
+      ]
+    },
+    {
+      "top_k": 4,
+      "dimension": 4,
+      "cutoff_abs_rho": 0.44678001833992004,
+      "features": [
+        "ct_state_ttl",
+        "sttl",
+        "ct_dst_sport_ltm",
+        "state"
+      ]
+    },
+    {
+      "top_k": 5,
+      "dimension": 5,
+      "cutoff_abs_rho": 0.44289266762438295,
+      "features": [
+        "ct_state_ttl",
+        "sttl",
+        "ct_dst_sport_ltm",
+        "state",
+        "dload"
+      ]
+    }
+  ]
+}
