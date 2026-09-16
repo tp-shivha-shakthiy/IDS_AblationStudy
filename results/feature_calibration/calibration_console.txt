@@ -1,0 +1,52 @@
+SPEARMAN CALIBRATION
+Features evaluated: 43
+ 1. ct_state_ttl: rho=-0.841011023034, abs_rho=0.841011023034
+ 2. sttl: rho=-0.682816449789, abs_rho=0.682816449789
+ 3. ct_dst_sport_ltm: rho=-0.475795749117, abs_rho=0.475795749117
+ 4. state: rho=-0.446780018340, abs_rho=0.446780018340
+ 5. dload: rho=0.442892667624, abs_rho=0.442892667624
+ 6. dttl: rho=0.407613617547, abs_rho=0.407613617547
+ 7. ct_src_dport_ltm: rho=-0.406147436554, abs_rho=0.406147436554
+ 8. dmeansz: rho=0.404286851934, abs_rho=0.404286851934
+ 9. dbytes: rho=0.394267097780, abs_rho=0.394267097780
+10. dpkts: rho=0.391333164783, abs_rho=0.391333164783
+11. sbytes: rho=0.387102453599, abs_rho=0.387102453599
+12. ct_dst_src_ltm: rho=-0.359234639082, abs_rho=0.359234639082
+13. dintpkt: rho=0.316258859016, abs_rho=0.316258859016
+14. spkts: rho=0.309207373494, abs_rho=0.309207373494
+15. dur: rho=0.300312172358, abs_rho=0.300312172358
+16. swin: rho=0.297209913905, abs_rho=0.297209913905
+17. dwin: rho=0.296134152007, abs_rho=0.296134152007
+18. dsport: rho=0.292265832097, abs_rho=0.292265832097
+19. dloss: rho=0.291417163430, abs_rho=0.291417163430
+20. sloss: rho=0.283662258245, abs_rho=0.283662258245
+21. sload: rho=-0.282102502378, abs_rho=0.282102502378
+22. ct_srv_src: rho=-0.277348089195, abs_rho=0.277348089195
+23. ct_srv_dst: rho=-0.275301316349, abs_rho=0.275301316349
+24. dtcpb: rho=0.262097530848, abs_rho=0.262097530848
+25. stcpb: rho=0.261928221008, abs_rho=0.261928221008
+26. djit: rho=0.260944277935, abs_rho=0.260944277935
+27. smeansz: rho=0.259721295319, abs_rho=0.259721295319
+28. sintpkt: rho=0.251106842426, abs_rho=0.251106842426
+29. proto: rho=-0.243062135597, abs_rho=0.243062135597
+30. ct_src_ltm: rho=-0.242771395449, abs_rho=0.242771395449
+31. sjit: rho=0.228297843679, abs_rho=0.228297843679
+32. ct_dst_ltm: rho=-0.227570325790, abs_rho=0.227570325790
+33. synack: rho=0.206771528678, abs_rho=0.206771528678
+34. tcprtt: rho=0.206726600146, abs_rho=0.206726600146
+35. ackdat: rho=0.206607327277, abs_rho=0.206607327277
+36. sport: rho=0.164502024207, abs_rho=0.164502024207
+37. service: rho=-0.113764170090, abs_rho=0.113764170090
+38. res_bdy_len: rho=0.052270792718, abs_rho=0.052270792718
+39. ct_flw_http_mthd: rho=0.037998578042, abs_rho=0.037998578042
+40. trans_depth: rho=0.037994122372, abs_rho=0.037994122372
+41. ct_ftp_cmd: rho=0.026333254453, abs_rho=0.026333254453
+42. is_ftp_login: rho=0.026237696436, abs_rho=0.026237696436
+43. is_sm_ips_ports: rho=0.013922121932, abs_rho=0.013922121932
+Detected knee: 4 (maximum_distance_to_endpoint_chord)
+Selected dimension: 4
+Selected features: ['ct_state_ttl', 'sttl', 'ct_dst_sport_ltm', 'state']
+Coefficient at knee: 0.44678001833992004
+Largest adjacent drops: [{'after_rank': 2, 'drop': 0.20702070067197897, 'from_abs_rho': 0.6828164497886134, 'to_abs_rho': 0.47579574911663447}, {'after_rank': 1, 'drop': 0.15819457324515496, 'from_abs_rho': 0.8410110230337684, 'to_abs_rho': 0.6828164497886134}, {'after_rank': 37, 'drop': 0.0614933773721405, 'from_abs_rho': 0.11376417009033434, 'to_abs_rho': 0.052270792718193834}, {'after_rank': 36, 'drop': 0.05073785411705835, 'from_abs_rho': 0.16450202420739268, 'to_abs_rho': 0.11376417009033434}, {'after_rank': 12, 'drop': 0.042975780065928504, 'from_abs_rho': 0.3592346390815619, 'to_abs_rho': 0.3162588590156334}]
+Near-zero tail: {'exact_zero_count': 0, 'minimum_abs_rho': 0.013922121932098274, 'p10_abs_rho': 0.04085302097724579, 'p25_abs_rho': 0.2171709272342433}
+Nearest alternative cutoffs: [{'top_k': 3, 'dimension': 3, 'cutoff_abs_rho': 0.47579574911663447, 'features': ['ct_state_ttl', 'sttl', 'ct_dst_sport_ltm']}, {'top_k': 4, 'dimension': 4, 'cutoff_abs_rho': 0.44678001833992004, 'features': ['ct_state_ttl', 'sttl', 'ct_dst_sport_ltm', 'state']}, {'top_k': 5, 'dimension': 5, 'cutoff_abs_rho': 0.44289266762438295, 'features': ['ct_state_ttl', 'sttl', 'ct_dst_sport_ltm', 'state', 'dload']}]
