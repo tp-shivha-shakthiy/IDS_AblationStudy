@@ -26,7 +26,8 @@ from imblearn.under_sampling import RandomUnderSampler
 from sklearn.cluster import MiniBatchKMeans
 
 
-def _kms_fit_resample(X, y, adj_k, random_state, stage="balancing"):
+def _kms_fit_resample(X, y, adj_k, n_clusters, random_state, cluster_balance_threshold=0.0,
+                      n_jobs=1, stage="balancing"):
     """
     Run KMeansSMOTE with visible progress logging.
 
@@ -43,11 +44,13 @@ def _kms_fit_resample(X, y, adj_k, random_state, stage="balancing"):
     )
     t0 = time.perf_counter()
     kms = KMeansSMOTE(
-        cluster_balance_threshold=0.0,
+        cluster_balance_threshold=cluster_balance_threshold,
         k_neighbors=adj_k,
-        kmeans_estimator=MiniBatchKMeans(n_init='auto', random_state=random_state),
+        kmeans_estimator=MiniBatchKMeans(
+            n_clusters=n_clusters, n_init='auto', random_state=random_state,
+        ),
         random_state=random_state,
-        n_jobs=1,
+        n_jobs=n_jobs,
     )
     X_res, y_res = kms.fit_resample(X, y)
     dt = time.perf_counter() - t0
@@ -71,6 +74,8 @@ def balance_training_fold(
     n_clusters: int = 20,
     random_state: int = 42,
     rus_cap: int = 0,
+    cluster_balance_threshold: float = 0.0,
+    n_jobs: int = 1,
     stage: str = "fold",
 ) -> tuple:
     """
@@ -106,7 +111,9 @@ def balance_training_fold(
         adj_k = min(k_neighbors, minority_count - 1)
         adj_k = max(adj_k, 1)
         X_res, y_res = _kms_fit_resample(
-            X_use, y_use, adj_k, random_state, stage=stage,
+            X_use, y_use, adj_k, n_clusters, random_state,
+            cluster_balance_threshold=cluster_balance_threshold,
+            n_jobs=n_jobs, stage=stage,
         )
     else:
         minority_count = min(Counter(y_use).values())
@@ -130,6 +137,8 @@ def balance_full_train(
     n_clusters: int = 20,
     random_state: int = 42,
     rus_cap: int = 0,
+    cluster_balance_threshold: float = 0.0,
+    n_jobs: int = 1,
 ) -> tuple:
     """
     Balance the full training set for final model retraining.
@@ -157,6 +166,8 @@ def balance_full_train(
         n_clusters=n_clusters,
         random_state=random_state,
         rus_cap=rus_cap,
+        cluster_balance_threshold=cluster_balance_threshold,
+        n_jobs=n_jobs,
         stage="final retrain",
     )
     print(f"    Balanced training: {X_train.shape[0]:,} -> "

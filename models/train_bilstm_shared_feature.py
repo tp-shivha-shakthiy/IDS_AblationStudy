@@ -1,9 +1,15 @@
 """
-train_dnn_mi_pca_kmeans.py
-===========================
-DNN — participates in the seven-preset ablation.
+train_bilstm_shared_feature.py
+==========================================
+Multi-Task Hierarchical DNN with shared feature extractor — participates in
+the seven-preset ablation.
 
-Architecture preserved: 3 hidden layers (128→64→32), BatchNorm, Dropout(0.2).
+Architecture preserved:
+  Shared base: Linear(in→128)→BN→ReLU→Drop(0.2)→Linear(128→64)→BN→ReLU→Drop(0.2)
+  Binary head: Linear(64→2)
+  Multi head:  Linear(64→32)→ReLU→Linear(32→num_classes)
+  Loss: 0.4 * CE(binary) + 0.6 * CE(multi)
+
 The MI / PCA / KMeansSMOTE preprocessing is driven by the ``--experiment``
 ablation preset (identical hyperparameters to Tier 1: MI k=15, PCA 0.95
 variance, KMeansSMOTE k_neighbors=3, no undersampling).
@@ -30,23 +36,24 @@ from sklearn.model_selection import StratifiedKFold
 from src.dl_pipeline import (
     set_seeds, get_device, load_data,
     preprocess_fold, preprocess_final,
-    evaluate_with_proba, get_probabilities, save_dl_artifacts,
+    evaluate_with_proba, save_dl_artifacts,
 )
 from src.experiment_config import build_experiment_config, resolve_experiment, OFFICIAL_RUS_CAP
 
 set_seeds(42)
 device = get_device()
-MODEL_NAME = "DNN_MI_PCA_KMeans"
+MODEL_NAME = "BiLSTM_SharedFE"
 
 
 # ======================================================================
 # Model Architecture (preserved from original)
 # ======================================================================
 
-class DeepNeuralNetwork(nn.Module):
-    def __init__(self, input_dim, output_dim):
+class MultiTaskHierarchicalDNN(nn.Module):
+    def __init__(self, input_dim, num_classes):
         super().__init__()
-        self.network = nn.Sequential(
+        # Shared feature extractor
+        self.shared = nn.Sequential(
             nn.Linear(input_dim, 128),
             nn.BatchNorm1d(128),
             nn.ReLU(),
@@ -55,14 +62,21 @@ class DeepNeuralNetwork(nn.Module):
             nn.BatchNorm1d(64),
             nn.ReLU(),
             nn.Dropout(0.2),
+        )
+        # Binary head (Normal vs Attack)
+        self.binary_head = nn.Linear(64, 2)
+        # Multi-class head (9 attack categories)
+        self.multi_head = nn.Sequential(
             nn.Linear(64, 32),
-            nn.BatchNorm1d(32),
             nn.ReLU(),
-            nn.Linear(32, output_dim),
+            nn.Linear(32, num_classes),
         )
 
     def forward(self, x):
-        return self.network(x)
+        features = self.shared(x)
+        binary_out = self.binary_head(features)
+        multi_out = self.multi_head(features)
+        return binary_out, multi_out
 
 
 # ======================================================================
@@ -82,7 +96,7 @@ def main(data_dir="data/raw", experiment="mi_pca_balancing", cap=OFFICIAL_RUS_CA
     class_names = data['class_names']
 
     print(f"\n{'='*60}")
-    print(f"  {MODEL_NAME} - DNN")
+    print(f"  {MODEL_NAME} - Multi-Task Hierarchical DNN")
     print(f"  Experiment: {experiment}  "
           f"(MI={'on' if use_mi else 'off'}, "
           f"PCA={'on' if use_pca else 'off'}, "
@@ -105,34 +119,47 @@ def main(data_dir="data/raw", experiment="mi_pca_balancing", cap=OFFICIAL_RUS_CA
             use_mi=use_mi, use_pca=use_pca, use_balancing=use_balancing,
         )
 
+        y_tr_binary = (fold_data['y_tr'] != normal_class_idx).astype(int)
+        y_val_binary = (fold_data['y_val'] != normal_class_idx).astype(int)
+
         X_tr_t = torch.tensor(fold_data['X_tr'], dtype=torch.float32)
         y_tr_t = torch.tensor(fold_data['y_tr'], dtype=torch.long)
+        y_tr_bin_t = torch.tensor(y_tr_binary, dtype=torch.long)
         X_val_t = torch.tensor(fold_data['X_val'], dtype=torch.float32)
 
         train_loader = DataLoader(
-            TensorDataset(X_tr_t, y_tr_t), batch_size=512, shuffle=True,
+            TensorDataset(X_tr_t, y_tr_t, y_tr_bin_t),
+            batch_size=512, shuffle=True,
             drop_last=True,
         )
 
-        model = DeepNeuralNetwork(fold_data['X_tr'].shape[1], num_classes).to(device)
-        criterion = nn.CrossEntropyLoss()
+        model = MultiTaskHierarchicalDNN(
+            fold_data['X_tr'].shape[1], num_classes,
+        ).to(device)
+
+        ce_multi = nn.CrossEntropyLoss()
+        ce_binary = nn.CrossEntropyLoss()
         optimizer = optim.AdamW(model.parameters(), lr=0.005, weight_decay=1e-4)
 
         model.train()
-        for epoch in range(10):
-            for bx, by in train_loader:
-                bx, by = bx.to(device), by.to(device)
+        for epoch in range(8):
+            for bx, by_multi, by_bin in train_loader:
+                bx = bx.to(device)
+                by_multi = by_multi.to(device)
+                by_bin = by_bin.to(device)
                 optimizer.zero_grad()
-                loss = criterion(model(bx), by)
+                bin_out, multi_out = model(bx)
+                loss = 0.4 * ce_binary(bin_out, by_bin) + 0.6 * ce_multi(multi_out, by_multi)
                 loss.backward()
                 optimizer.step()
 
         model.eval()
         with torch.no_grad():
-            preds = torch.argmax(model(X_val_t.to(device)), dim=1).cpu().numpy()
+            bin_out, multi_out = model(X_val_t.to(device))
+            preds_multi = torch.argmax(multi_out, dim=1).cpu().numpy()
+            val_proba = torch.softmax(multi_out, dim=1).cpu().numpy()
 
-        val_proba = get_probabilities(model, fold_data['X_val'], device)
-        metrics = evaluate_with_proba(y_val, preds, val_proba, normal_class_idx)
+        metrics = evaluate_with_proba(y_val, preds_multi, val_proba, normal_class_idx)
         metrics['fold'] = fold
         cv_metrics.append(metrics)
         print(f"    Acc={metrics['multi_acc']:.4f}  F1={metrics['weighted_f1']:.4f}")
@@ -146,34 +173,46 @@ def main(data_dir="data/raw", experiment="mi_pca_balancing", cap=OFFICIAL_RUS_CA
         use_mi=use_mi, use_pca=use_pca, use_balancing=use_balancing,
     )
 
+    y_tr_binary = (final_data['y_train'] != normal_class_idx).astype(int)
+
     X_tr_t = torch.tensor(final_data['X_train'], dtype=torch.float32)
     y_tr_t = torch.tensor(final_data['y_train'], dtype=torch.long)
+    y_tr_bin_t = torch.tensor(y_tr_binary, dtype=torch.long)
     X_te_t = torch.tensor(final_data['X_test'], dtype=torch.float32)
 
     train_loader = DataLoader(
-        TensorDataset(X_tr_t, y_tr_t), batch_size=512, shuffle=True,
+        TensorDataset(X_tr_t, y_tr_t, y_tr_bin_t),
+        batch_size=512, shuffle=True,
         drop_last=True,
     )
 
-    final_model = DeepNeuralNetwork(final_data['X_train'].shape[1], num_classes).to(device)
-    criterion = nn.CrossEntropyLoss()
+    final_model = MultiTaskHierarchicalDNN(
+        final_data['X_train'].shape[1], num_classes,
+    ).to(device)
+
+    ce_multi = nn.CrossEntropyLoss()
+    ce_binary = nn.CrossEntropyLoss()
     optimizer = optim.AdamW(final_model.parameters(), lr=0.005, weight_decay=1e-4)
 
     final_model.train()
-    for epoch in range(10):
-        for bx, by in train_loader:
-            bx, by = bx.to(device), by.to(device)
+    for epoch in range(8):
+        for bx, by_multi, by_bin in train_loader:
+            bx = bx.to(device)
+            by_multi = by_multi.to(device)
+            by_bin = by_bin.to(device)
             optimizer.zero_grad()
-            loss = criterion(final_model(bx), by)
+            bin_out, multi_out = final_model(bx)
+            loss = 0.4 * ce_binary(bin_out, by_bin) + 0.6 * ce_multi(multi_out, by_multi)
             loss.backward()
             optimizer.step()
 
     # --- Test evaluation ---
     final_model.eval()
     with torch.no_grad():
-        test_preds = torch.argmax(final_model(X_te_t.to(device)), dim=1).cpu().numpy()
+        _, multi_out = final_model(X_te_t.to(device))
+        test_preds = torch.argmax(multi_out, dim=1).cpu().numpy()
+        test_proba = torch.softmax(multi_out, dim=1).cpu().numpy()
 
-    test_proba = get_probabilities(final_model, final_data['X_test'], device)
     test_metrics = evaluate_with_proba(y_test, test_preds, test_proba, normal_class_idx)
 
     print(f"\n  {MODEL_NAME} Test Metrics:")
@@ -192,12 +231,15 @@ def main(data_dir="data/raw", experiment="mi_pca_balancing", cap=OFFICIAL_RUS_CA
         selector=final_data['selector'],
         scaler=final_data['scaler'],
         pca=final_data['pca'],
+        categorical_encoder=final_data['categorical_encoder'],
         le=data['le'],
         config=build_experiment_config(
             model_name=MODEL_NAME,
-            model_params={"layers": [128, 64, 32], "dropout": 0.2,
+            model_params={"shared_layers": [128, 64], "binary_head": 2,
+                          "multi_head": [32], "dropout": 0.2,
                           "lr": 0.005, "weight_decay": 1e-4,
-                          "epochs": 10, "batch_size": 512},
+                          "epochs": 8, "batch_size": 512,
+                          "loss_weights": {"binary": 0.4, "multi": 0.6}},
             experiment_name=experiment,
             preprocessing_mode=experiment,
             use_mi=use_mi, use_pca=use_pca, use_balancing=use_balancing,

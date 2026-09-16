@@ -32,7 +32,7 @@ from sklearn.metrics import (precision_score, recall_score, f1_score,
 
 from src.balancing import balance_training_fold
 from src.feature_selection import fit_mi_selector
-from src.preprocessing import fit_categorical_encoder, transform_features
+from src.preprocessing import fit_categorical_encoder, transform_features, feature_type_mask
 
 
 # ===================================================================
@@ -172,14 +172,17 @@ def run_cv(
                 categorical_encoder = fit_categorical_encoder(X_tr_raw)
                 X_tr = transform_features(X_tr_raw, categorical_encoder)
                 X_val = transform_features(X_val_raw, categorical_encoder)
+                discrete_mask = feature_type_mask()
             else:
                 X_tr, X_val = X_train[trn_idx], X_train[val_idx]
+                discrete_mask = np.zeros(X_tr.shape[1], dtype=bool)
             y_tr, y_val = y_train[trn_idx], y_train[val_idx]
 
             # --- 1. MI Feature Selection fitted on fold train only ---
             if use_mi:
                 fold_selector = fit_mi_selector(X_tr, y_tr, k=mi_k,
-                                                random_state=random_state)
+                                                random_state=random_state,
+                                                discrete_features=discrete_mask)
                 X_tr_mi = fold_selector.transform(X_tr)
                 X_val_mi = fold_selector.transform(X_val)
             else:
