@@ -1,0 +1,65 @@
+{
+  "balancing_audit": {
+    "class_counts_after": {
+      "0": 15005,
+      "1": 15005,
+      "2": 15012,
+      "3": 15000,
+      "4": 15000,
+      "5": 15000,
+      "6": 15000,
+      "7": 15009,
+      "8": 15003,
+      "9": 15004
+    },
+    "class_counts_before": {
+      "0": 1713,
+      "1": 1149,
+      "2": 10466,
+      "3": 15000,
+      "4": 15000,
+      "5": 15000,
+      "6": 15000,
+      "7": 8951,
+      "8": 968,
+      "9": 111
+    },
+    "effective_minibatch_kmeans_nonempty_clusters": 20,
+    "failure_reason": null,
+    "fallback_method": null,
+    "fallback_parameters": null,
+    "fallback_used": false,
+    "fold": 1,
+    "phase": "cross_validation",
+    "primary_method_attempted": "KMeansSMOTE",
+    "primary_parameters": {
+      "cluster_balance_threshold": 0.0,
+      "k_neighbors": 3,
+      "n_clusters": 20,
+      "n_jobs": 1,
+      "random_state": 42
+    },
+    "stage": "fold"
+  },
+  "balancing_seconds": 4.931341931223869,
+  "checkpoint_schema_version": 1,
+  "config_fingerprint": "a3f0ce268691f7d16ec32524a0818822efc36412974cb7791ef0e24ecb38f038",
+  "experiment": "E1_sequential_mi_pca",
+  "feature_dimensions": {
+    "final_dimension": 7,
+    "mi_dimension": 15,
+    "pca_dimension": 7,
+    "prepared_dimension": 43
+  },
+  "fold_number": 1,
+  "model": "XGBoost",
+  "random_state": 42,
+  "split": {
+    "method": "stratified_80_20",
+    "random_state": 42
+  },
+  "training_seconds": 1.5469176471233368,
+  "validation_metrics": {
+    "accuracy": 0.9277154977264227
+  }
+}
