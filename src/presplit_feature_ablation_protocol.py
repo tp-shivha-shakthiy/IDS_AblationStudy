@@ -31,6 +31,10 @@ from src.feature_selection import fit_mi_selector
 from src.model_training import MODEL_REGISTRY, _ensure_registry
 from src.preprocessing import feature_type_mask, fit_categorical_encoder, transform_features
 from src.presplit_ablation_models import DL_MODELS, run_dl_presplit_experiment
+from src.presplit_cv_checkpoints import (
+    build_cv_config_fingerprint, load_compatible_fold_checkpoint,
+    save_fold_checkpoint,
+)
 
 
 PROTOCOL = "presplit_feature_ablation"
@@ -353,6 +357,7 @@ def run_presplit_ablation_experiment(
     results_root=RESULTS_ROOT,
     spearman_selection_rule=None,
     spearman_selection_value=None,
+    resume=False,
 ):
     """Run one presplit experiment with one existing classical or DL architecture."""
     print("[1] Loading/preparing full dataset", flush=True)
@@ -403,6 +408,14 @@ def run_presplit_ablation_experiment(
         "rus_cap": rus_cap,
         "spearman_selection_rule": spearman_selection_rule,
         "spearman_selection_value": spearman_selection_value,
+        "split_method": "stratified_80_20",
+        "test_size": 0.20,
+        "balancer": "KMeansSMOTE",
+        "balancer_n_clusters": 20,
+        "cluster_balance_threshold": 0.0,
+        "balancer_n_jobs": 1,
+        "feature_dimensions": dimensions,
+        "selected_features": artifacts.get("selected_features"),
     }
 
     if model_name in DL_MODELS:
@@ -424,12 +437,22 @@ def run_presplit_ablation_experiment(
             rus_cap,
             random_state,
             config,
+            resume=resume,
         )
 
     _ensure_registry()
     entry = MODEL_REGISTRY[model_name]
     model_class = entry["model_class"]
     model_params = entry["params"]
+    config["model_hyperparameters"] = model_params
+
+    save_dir = os.path.join(results_root, experiment, model_name)
+    fingerprint = build_cv_config_fingerprint(
+        config,
+        dimensions,
+        artifacts.get("selected_features"),
+    )
+    config["cv_checkpoint_fingerprint"] = fingerprint
 
     cv = StratifiedKFold(
         n_splits=n_splits,
@@ -437,27 +460,51 @@ def run_presplit_ablation_experiment(
         random_state=random_state,
     )
     cv_metrics = []
+    balancing_audit = []
 
     for fold_number, (train_idx, val_idx) in enumerate(
         cv.split(X_train, y_train),
         1,
     ):
+        if resume:
+            checkpoint = load_compatible_fold_checkpoint(
+                save_dir,
+                fold_number,
+                fingerprint,
+                config,
+                dimensions,
+            )
+            if checkpoint is not None:
+                print(
+                    f"[CV {fold_number}/{n_splits}] compatible checkpoint reused",
+                    flush=True,
+                )
+                cv_metrics.append(
+                    checkpoint["validation_metrics"]["accuracy"]
+                )
+                balancing_audit.append(checkpoint["balancing_audit"])
+                continue
+
         print(
             f"[CV {fold_number}/{n_splits}] balancing started",
             flush=True,
         )
         balance_start = time.perf_counter()
-        X_fold, y_fold = balance_training_fold(
+        X_fold, y_fold, fold_audit = balance_training_fold(
             X_train[train_idx],
             y_train[train_idx],
             strategy="kmeans",
             k_neighbors=k_neighbors,
             random_state=random_state,
             rus_cap=rus_cap,
+            return_audit=True,
         )
+        fold_audit.update({"phase": "cross_validation", "fold": fold_number})
+        balancing_audit.append(fold_audit)
+        fold_balancing_seconds = time.perf_counter() - balance_start
         print(
             f"[CV {fold_number}/{n_splits}] balancing finished in "
-            f"{time.perf_counter() - balance_start:.1f} seconds; "
+            f"{fold_balancing_seconds:.1f} seconds; "
             f"shapes {X_train[train_idx].shape} -> {X_fold.shape}",
             flush=True,
         )
@@ -468,17 +515,32 @@ def run_presplit_ablation_experiment(
         )
         training_start = time.perf_counter()
         fold_model = model_class(**model_params).fit(X_fold, y_fold)
+        fold_training_seconds = time.perf_counter() - training_start
         print(
             f"[CV {fold_number}/{n_splits}] model training finished in "
-            f"{time.perf_counter() - training_start:.1f} seconds",
+            f"{fold_training_seconds:.1f} seconds",
             flush=True,
         )
 
-        cv_metrics.append(
-            accuracy_score(
-                y_train[val_idx],
-                fold_model.predict(X_train[val_idx]),
-            )
+        validation_metrics = {
+            "accuracy": float(
+                accuracy_score(
+                    y_train[val_idx],
+                    fold_model.predict(X_train[val_idx]),
+                )
+            ),
+        }
+        cv_metrics.append(validation_metrics["accuracy"])
+        save_fold_checkpoint(
+            save_dir,
+            fold_number,
+            validation_metrics,
+            fold_audit,
+            fold_balancing_seconds,
+            fold_training_seconds,
+            config,
+            dimensions,
+            fingerprint,
         )
         print(
             f"[CV {fold_number}/{n_splits}] validation complete",
@@ -487,14 +549,17 @@ def run_presplit_ablation_experiment(
 
     print("[FINAL] full 80% balancing started", flush=True)
     balance_start = time.perf_counter()
-    X_balanced, y_balanced = balance_full_train(
+    X_balanced, y_balanced, final_audit = balance_full_train(
         X_train,
         y_train,
         strategy="kmeans",
         k_neighbors=k_neighbors,
         random_state=random_state,
         rus_cap=rus_cap,
+        return_audit=True,
     )
+    final_audit["phase"] = "final_retrain"
+    balancing_audit.append(final_audit)
     balancing_seconds = time.perf_counter() - balance_start
     print(
         f"[FINAL] full 80% balancing finished in "
@@ -527,7 +592,6 @@ def run_presplit_ablation_experiment(
         normal_class_idx,
     )
 
-    save_dir = os.path.join(results_root, experiment, model_name)
     os.makedirs(save_dir, exist_ok=True)
 
     model_path = os.path.join(
@@ -554,6 +618,7 @@ def run_presplit_ablation_experiment(
         ("feature_dimensions.json", dimensions),
         ("resolved_config.json", config),
         ("environment.json", _environment()),
+        ("balancing_audit.json", {"events": balancing_audit}),
     ):
         with open(os.path.join(save_dir, filename), "w") as handle:
             json.dump(payload, handle, indent=2)

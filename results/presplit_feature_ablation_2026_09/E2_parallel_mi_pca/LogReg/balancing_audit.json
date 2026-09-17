@@ -1,0 +1,255 @@
+{
+  "events": [
+    {
+      "stage": "fold",
+      "class_counts_before": {
+        "0": 1713,
+        "1": 1149,
+        "2": 10466,
+        "3": 15000,
+        "4": 15000,
+        "5": 15000,
+        "6": 15000,
+        "7": 8951,
+        "8": 968,
+        "9": 111
+      },
+      "primary_method_attempted": "KMeansSMOTE",
+      "primary_parameters": {
+        "k_neighbors": 3,
+        "n_clusters": 20,
+        "cluster_balance_threshold": 0.0,
+        "random_state": 42,
+        "n_jobs": 1
+      },
+      "effective_minibatch_kmeans_nonempty_clusters": 20,
+      "fallback_used": false,
+      "failure_reason": null,
+      "fallback_method": null,
+      "fallback_parameters": null,
+      "class_counts_after": {
+        "0": 15006,
+        "1": 15007,
+        "2": 15012,
+        "3": 15000,
+        "4": 15000,
+        "5": 15000,
+        "6": 15000,
+        "7": 15011,
+        "8": 15002,
+        "9": 15004
+      },
+      "phase": "cross_validation",
+      "fold": 1
+    },
+    {
+      "stage": "fold",
+      "class_counts_before": {
+        "0": 1713,
+        "1": 1149,
+        "2": 10466,
+        "3": 15000,
+        "4": 15000,
+        "5": 15000,
+        "6": 15000,
+        "7": 8952,
+        "8": 967,
+        "9": 111
+      },
+      "primary_method_attempted": "KMeansSMOTE",
+      "primary_parameters": {
+        "k_neighbors": 3,
+        "n_clusters": 20,
+        "cluster_balance_threshold": 0.0,
+        "random_state": 42,
+        "n_jobs": 1
+      },
+      "effective_minibatch_kmeans_nonempty_clusters": 20,
+      "fallback_used": false,
+      "failure_reason": null,
+      "fallback_method": null,
+      "fallback_parameters": null,
+      "class_counts_after": {
+        "0": 15005,
+        "1": 15008,
+        "2": 15016,
+        "3": 15000,
+        "4": 15000,
+        "5": 15000,
+        "6": 15000,
+        "7": 15008,
+        "8": 15003,
+        "9": 15003
+      },
+      "phase": "cross_validation",
+      "fold": 2
+    },
+    {
+      "stage": "fold",
+      "class_counts_before": {
+        "0": 1714,
+        "1": 1148,
+        "2": 10466,
+        "3": 15000,
+        "4": 15000,
+        "5": 15000,
+        "6": 15000,
+        "7": 8951,
+        "8": 967,
+        "9": 112
+      },
+      "primary_method_attempted": "KMeansSMOTE",
+      "primary_parameters": {
+        "k_neighbors": 3,
+        "n_clusters": 20,
+        "cluster_balance_threshold": 0.0,
+        "random_state": 42,
+        "n_jobs": 1
+      },
+      "effective_minibatch_kmeans_nonempty_clusters": 20,
+      "fallback_used": false,
+      "failure_reason": null,
+      "fallback_method": null,
+      "fallback_parameters": null,
+      "class_counts_after": {
+        "0": 15006,
+        "1": 15007,
+        "2": 15012,
+        "3": 15000,
+        "4": 15000,
+        "5": 15000,
+        "6": 15000,
+        "7": 15010,
+        "8": 15004,
+        "9": 15003
+      },
+      "phase": "cross_validation",
+      "fold": 3
+    },
+    {
+      "stage": "fold",
+      "class_counts_before": {
+        "0": 1714,
+        "1": 1149,
+        "2": 10465,
+        "3": 15000,
+        "4": 15000,
+        "5": 15000,
+        "6": 15000,
+        "7": 8951,
+        "8": 967,
+        "9": 111
+      },
+      "primary_method_attempted": "KMeansSMOTE",
+      "primary_parameters": {
+        "k_neighbors": 3,
+        "n_clusters": 20,
+        "cluster_balance_threshold": 0.0,
+        "random_state": 42,
+        "n_jobs": 1
+      },
+      "effective_minibatch_kmeans_nonempty_clusters": 20,
+      "fallback_used": false,
+      "failure_reason": null,
+      "fallback_method": null,
+      "fallback_parameters": null,
+      "class_counts_after": {
+        "0": 15007,
+        "1": 15007,
+        "2": 15014,
+        "3": 15000,
+        "4": 15000,
+        "5": 15000,
+        "6": 15000,
+        "7": 15014,
+        "8": 15002,
+        "9": 15004
+      },
+      "phase": "cross_validation",
+      "fold": 4
+    },
+    {
+      "stage": "fold",
+      "class_counts_before": {
+        "0": 1714,
+        "1": 1149,
+        "2": 10465,
+        "3": 15000,
+        "4": 15000,
+        "5": 15000,
+        "6": 15000,
+        "7": 8951,
+        "8": 967,
+        "9": 111
+      },
+      "primary_method_attempted": "KMeansSMOTE",
+      "primary_parameters": {
+        "k_neighbors": 3,
+        "n_clusters": 20,
+        "cluster_balance_threshold": 0.0,
+        "random_state": 42,
+        "n_jobs": 1
+      },
+      "effective_minibatch_kmeans_nonempty_clusters": 20,
+      "fallback_used": false,
+      "failure_reason": null,
+      "fallback_method": null,
+      "fallback_parameters": null,
+      "class_counts_after": {
+        "0": 15005,
+        "1": 15009,
+        "2": 15017,
+        "3": 15000,
+        "4": 15000,
+        "5": 15000,
+        "6": 15000,
+        "7": 15009,
+        "8": 15003,
+        "9": 15002
+      },
+      "phase": "cross_validation",
+      "fold": 5
+    },
+    {
+      "stage": "final retrain",
+      "class_counts_before": {
+        "0": 2142,
+        "1": 1436,
+        "2": 13082,
+        "3": 15000,
+        "4": 15000,
+        "5": 15000,
+        "6": 15000,
+        "7": 11189,
+        "8": 1209,
+        "9": 139
+      },
+      "primary_method_attempted": "KMeansSMOTE",
+      "primary_parameters": {
+        "k_neighbors": 3,
+        "n_clusters": 20,
+        "cluster_balance_threshold": 0.0,
+        "random_state": 42,
+        "n_jobs": 1
+      },
+      "effective_minibatch_kmeans_nonempty_clusters": 20,
+      "fallback_used": false,
+      "failure_reason": null,
+      "fallback_method": null,
+      "fallback_parameters": null,
+      "class_counts_after": {
+        "0": 15005,
+        "1": 15006,
+        "2": 15013,
+        "3": 15000,
+        "4": 15000,
+        "5": 15000,
+        "6": 15000,
+        "7": 15009,
+        "8": 15002,
+        "9": 15002
+      },
+      "phase": "final_retrain"
+    }
+  ]
+}

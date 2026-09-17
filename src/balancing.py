@@ -26,6 +26,64 @@ from imblearn.under_sampling import RandomUnderSampler
 from sklearn.cluster import MiniBatchKMeans
 
 
+def _kmeans_smote_sparsity_failure_reason(error: Exception):
+    """Classify only KMeansSMOTE's known cluster-sparsity failure modes.
+
+    In imbalanced-learn 0.14.x, KMeansSMOTE computes per-cluster sampling
+    weights as ``cluster_sparsities / cluster_sparsities.sum()``.  A valid
+    cluster made entirely of duplicate minority samples has sparsity zero.  If
+    every valid cluster is like that, the sum is zero, yielding a NaN weight
+    and this specific conversion error when the sampler allocates samples.
+    """
+    if isinstance(error, ValueError) and "cannot convert float NaN to integer" in str(error):
+        return "kmeans_zero_sparsity"
+
+    # ``_ArrayMemoryError`` is a MemoryError subclass.  Restrict this fallback
+    # to a traceback through imbalanced-learn's sparsity routine so memory
+    # failures in KMeans fitting, SMOTE itself, or unrelated caller code still
+    # fail visibly instead of being treated as a balancing degeneracy.
+    traceback = error.__traceback__
+    while traceback is not None:
+        frame = traceback.tb_frame
+        if (
+            isinstance(error, MemoryError)
+            and frame.f_code.co_name == "_find_cluster_sparsity"
+            and frame.f_code.co_filename.replace("\\", "/").endswith("_smote/cluster.py")
+        ):
+            return "kmeans_sparsity_memory_error"
+        traceback = traceback.tb_next
+    return None
+
+
+def _balancing_audit(stage, counts_before, adj_k, n_clusters, random_state,
+                     cluster_balance_threshold, n_jobs):
+    """Build JSON-serializable metadata for one common balancing invocation."""
+    return {
+        "stage": stage,
+        "class_counts_before": {str(label): int(count) for label, count in counts_before.items()},
+        "primary_method_attempted": "KMeansSMOTE",
+        "primary_parameters": {
+            "k_neighbors": int(adj_k),
+            "n_clusters": int(n_clusters),
+            "cluster_balance_threshold": float(cluster_balance_threshold),
+            "random_state": int(random_state),
+            "n_jobs": int(n_jobs),
+        },
+        "effective_minibatch_kmeans_nonempty_clusters": None,
+        "fallback_used": False,
+        "failure_reason": None,
+        "fallback_method": None,
+        "fallback_parameters": None,
+    }
+
+
+def _record_effective_cluster_count(audit, sampler):
+    """Record nonempty fitted MiniBatchKMeans clusters when fit has completed."""
+    labels = getattr(getattr(sampler, "kmeans_estimator_", None), "labels_", None)
+    if labels is not None:
+        audit["effective_minibatch_kmeans_nonempty_clusters"] = int(np.unique(labels).size)
+
+
 def _kms_fit_resample(X, y, adj_k, n_clusters, random_state, cluster_balance_threshold=0.0,
                       n_jobs=1, stage="balancing"):
     """
@@ -42,6 +100,10 @@ def _kms_fit_resample(X, y, adj_k, n_clusters, random_state, cluster_balance_thr
         f"    {label}: {total_before:,} samples | before "
         f"-> {counts_before}", flush=True,
     )
+    audit = _balancing_audit(
+        stage, counts_before, adj_k, n_clusters, random_state,
+        cluster_balance_threshold, n_jobs,
+    )
     t0 = time.perf_counter()
     kms = KMeansSMOTE(
         cluster_balance_threshold=cluster_balance_threshold,
@@ -52,14 +114,50 @@ def _kms_fit_resample(X, y, adj_k, n_clusters, random_state, cluster_balance_thr
         random_state=random_state,
         n_jobs=n_jobs,
     )
-    X_res, y_res = kms.fit_resample(X, y)
+    try:
+        X_res, y_res = kms.fit_resample(X, y)
+    except (ValueError, MemoryError) as error:
+        _record_effective_cluster_count(audit, kms)
+        fallback_reason = _kmeans_smote_sparsity_failure_reason(error)
+        if fallback_reason is None:
+            raise
+
+        # This fallback is intentionally limited to KMeansSMOTE's documented
+        # zero/non-finite cluster-weight allocation failure.  Standard SMOTE
+        # retains the intended class-oversampling semantics while avoiding
+        # cluster-density weighting, and is deterministic with these same
+        # effective neighbour and seed settings.
+        audit.update({
+            "fallback_used": True,
+            "failure_reason": fallback_reason,
+            "failure_detail": str(error),
+            "fallback_method": "SMOTE",
+            "fallback_parameters": {
+                "k_neighbors": int(adj_k),
+                "random_state": int(random_state),
+            },
+        })
+        print(
+            f"    {label}: {fallback_reason}; "
+            f"falling back deterministically to SMOTE (k_neighbors={adj_k}, "
+            f"random_state={random_state})",
+            flush=True,
+        )
+        X_res, y_res = SMOTE(
+            random_state=random_state, k_neighbors=adj_k,
+        ).fit_resample(X, y)
+    else:
+        _record_effective_cluster_count(audit, kms)
     dt = time.perf_counter() - t0
     counts_after = dict(sorted(Counter(y_res).items()))
     print(
         f"    {label}: done in {dt:.1f}s | after -> {counts_after}",
         flush=True,
     )
-    return X_res, y_res
+    audit["class_counts_after"] = {
+        str(label): int(count) for label, count in sorted(Counter(y_res).items())
+    }
+    return X_res, y_res, audit
 
 
 # ---------------------------------------------------------------------------
@@ -77,6 +175,7 @@ def balance_training_fold(
     cluster_balance_threshold: float = 0.0,
     n_jobs: int = 1,
     stage: str = "fold",
+    return_audit: bool = False,
 ) -> tuple:
     """
     Balance a single training fold.  Must receive ONLY training data.
@@ -94,9 +193,12 @@ def balance_training_fold(
 
     Returns
     -------
-    X_balanced, y_balanced
+    X_balanced, y_balanced, or (when ``return_audit=True``) a third,
+    JSON-serializable balancing audit dictionary.
     """
     X_use, y_use = X_train, y_train
+    if not np.isfinite(np.asarray(X_use)).all():
+        raise ValueError("Balancing input contains non-finite feature values.")
 
     if rus_cap > 0:
         class_counts = Counter(y_use)
@@ -110,7 +212,7 @@ def balance_training_fold(
         minority_count = min(Counter(y_use).values())
         adj_k = min(k_neighbors, minority_count - 1)
         adj_k = max(adj_k, 1)
-        X_res, y_res = _kms_fit_resample(
+        X_res, y_res, audit = _kms_fit_resample(
             X_use, y_use, adj_k, n_clusters, random_state,
             cluster_balance_threshold=cluster_balance_threshold,
             n_jobs=n_jobs, stage=stage,
@@ -121,7 +223,26 @@ def balance_training_fold(
         adj_k = max(adj_k, 1)
         sm = SMOTE(random_state=random_state, k_neighbors=adj_k)
         X_res, y_res = sm.fit_resample(X_use, y_use)
+        audit = {
+            "stage": stage,
+            "class_counts_before": {
+                str(label): int(count) for label, count in sorted(Counter(y_use).items())
+            },
+            "primary_method_attempted": "SMOTE",
+            "primary_parameters": {
+                "k_neighbors": int(adj_k), "random_state": int(random_state),
+            },
+            "fallback_used": False,
+            "failure_reason": None,
+            "fallback_method": None,
+            "fallback_parameters": None,
+            "class_counts_after": {
+                str(label): int(count) for label, count in sorted(Counter(y_res).items())
+            },
+        }
 
+    if return_audit:
+        return X_res, y_res, audit
     return X_res, y_res
 
 
@@ -139,6 +260,7 @@ def balance_full_train(
     rus_cap: int = 0,
     cluster_balance_threshold: float = 0.0,
     n_jobs: int = 1,
+    return_audit: bool = False,
 ) -> tuple:
     """
     Balance the full training set for final model retraining.
@@ -157,9 +279,10 @@ def balance_full_train(
 
     Returns
     -------
-    X_balanced, y_balanced
+    X_balanced, y_balanced, or (when ``return_audit=True``) a third,
+    JSON-serializable balancing audit dictionary.
     """
-    X_balanced, y_balanced = balance_training_fold(
+    balanced = balance_training_fold(
         X_train, y_train,
         strategy=strategy,
         k_neighbors=k_neighbors,
@@ -169,7 +292,14 @@ def balance_full_train(
         cluster_balance_threshold=cluster_balance_threshold,
         n_jobs=n_jobs,
         stage="final retrain",
+        return_audit=return_audit,
     )
+    if return_audit:
+        X_balanced, y_balanced, audit = balanced
+    else:
+        X_balanced, y_balanced = balanced
     print(f"    Balanced training: {X_train.shape[0]:,} -> "
           f"{X_balanced.shape[0]:,} samples")
+    if return_audit:
+        return X_balanced, y_balanced, audit
     return X_balanced, y_balanced

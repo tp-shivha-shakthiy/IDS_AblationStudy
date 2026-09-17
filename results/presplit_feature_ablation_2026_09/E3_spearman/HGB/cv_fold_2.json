@@ -1,0 +1,68 @@
+{
+  "balancing_audit": {
+    "class_counts_after": {
+      "0": 15000,
+      "1": 15000,
+      "2": 15000,
+      "3": 15000,
+      "4": 15000,
+      "5": 15000,
+      "6": 15000,
+      "7": 15000,
+      "8": 15000,
+      "9": 15000
+    },
+    "class_counts_before": {
+      "0": 1713,
+      "1": 1149,
+      "2": 10466,
+      "3": 15000,
+      "4": 15000,
+      "5": 15000,
+      "6": 15000,
+      "7": 8952,
+      "8": 967,
+      "9": 111
+    },
+    "effective_minibatch_kmeans_nonempty_clusters": 20,
+    "failure_detail": "cannot convert float NaN to integer",
+    "failure_reason": "kmeans_zero_sparsity",
+    "fallback_method": "SMOTE",
+    "fallback_parameters": {
+      "k_neighbors": 3,
+      "random_state": 42
+    },
+    "fallback_used": true,
+    "fold": 2,
+    "phase": "cross_validation",
+    "primary_method_attempted": "KMeansSMOTE",
+    "primary_parameters": {
+      "cluster_balance_threshold": 0.0,
+      "k_neighbors": 3,
+      "n_clusters": 20,
+      "n_jobs": 1,
+      "random_state": 42
+    },
+    "stage": "fold"
+  },
+  "balancing_seconds": 8.538696900010109,
+  "checkpoint_schema_version": 1,
+  "config_fingerprint": "54a322a7dad81f27c2c9aa5c951d72505b804752de8b44112a0ea4380ee385c2",
+  "experiment": "E3_spearman",
+  "feature_dimensions": {
+    "final_dimension": 4,
+    "prepared_dimension": 43,
+    "selected_dimension": 4
+  },
+  "fold_number": 2,
+  "model": "HGB",
+  "random_state": 42,
+  "split": {
+    "method": "stratified_80_20",
+    "random_state": 42
+  },
+  "training_seconds": 2.2303011000039987,
+  "validation_metrics": {
+    "accuracy": 0.9397305171158048
+  }
+}
