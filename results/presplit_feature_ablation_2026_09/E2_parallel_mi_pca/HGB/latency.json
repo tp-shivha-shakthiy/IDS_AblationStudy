@@ -1,0 +1,17 @@
+{
+  "feature_preprocessing_seconds": 2083.5941315999953,
+  "balancing_seconds": 143.03283069998724,
+  "training_seconds": 6.40106319996994,
+  "model_save_seconds": 0.12619789998279884,
+  "model_load_seconds": 0.10219750000396743,
+  "cold_start_prediction_ms": 18.379900022409856,
+  "cold_start_total_ms": 120.57740002637729,
+  "warm_batch_prediction_seconds": 9.030328599968925,
+  "warm_inference_ms_per_sample": 0.0177758874824687,
+  "throughput_samples_per_second": 56255.98164852474,
+  "single_sample_mean_ms": 12.899606003775261,
+  "single_sample_median_ms": 11.741349997464567,
+  "single_sample_p95_ms": 19.373434991575774,
+  "model_size_bytes": 885534,
+  "model_size_mb": 0.8445110321044922
+}

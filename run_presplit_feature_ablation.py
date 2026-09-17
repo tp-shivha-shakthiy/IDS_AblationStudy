@@ -19,6 +19,7 @@ def main():
     parser.add_argument("--spearman-selection-rule", choices=SPEARMAN_SELECTION_RULES)
     parser.add_argument("--spearman-selection-value", type=float)
     parser.add_argument("--aggregate", action="store_true", help="Aggregate completed runs only; never trains.")
+    parser.add_argument("--resume", action="store_true", help="Reuse only compatible completed CV fold checkpoints.")
     args = parser.parse_args()
     if args.aggregate:
         from aggregate_presplit_feature_ablation import aggregate_completed_results
@@ -40,6 +41,7 @@ def main():
         model_name=args.model, rus_cap=args.cap, results_root=args.results_root,
         spearman_selection_rule=args.spearman_selection_rule,
         spearman_selection_value=args.spearman_selection_value,
+        resume=args.resume,
     )
     print(result["save_dir"])
 

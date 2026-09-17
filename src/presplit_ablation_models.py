@@ -9,6 +9,10 @@ import numpy as np
 
 from src.balancing import balance_full_train, balance_training_fold
 from src.evaluation import compute_extended_metrics
+from src.presplit_cv_checkpoints import (
+    build_cv_config_fingerprint, load_compatible_fold_checkpoint,
+    save_fold_checkpoint,
+)
 
 
 DL_MODELS = ("DNN", "LSTM", "BiLSTM", "BiLSTMSharedFeature")
@@ -121,20 +125,47 @@ def _latency(model_path, model_name, input_dim, classes, X_test, device, trainin
 
 def run_dl_presplit_experiment(X_train, X_test, y_train, y_test, class_names, normal_index,
                                experiment, model_name, dimensions, preprocessing_seconds, artifacts,
-                               results_root, n_splits, k_neighbors, rus_cap, random_state, config):
+                               results_root, n_splits, k_neighbors, rus_cap, random_state, config,
+                               resume=False):
     torch, *_ = _torch()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     classes = len(class_names)
     from sklearn.model_selection import StratifiedKFold
     from sklearn.metrics import accuracy_score
     cv_accuracy = []
-    for train_index, validation_index in StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state).split(X_train, y_train):
-        X_fold, y_fold = balance_training_fold(X_train[train_index], y_train[train_index], strategy="kmeans", k_neighbors=k_neighbors, random_state=random_state, rus_cap=rus_cap)
+    balancing_audit = []
+    save_dir = os.path.join(results_root, experiment, model_name)
+    fingerprint = build_cv_config_fingerprint(
+        config, dimensions, artifacts.get("selected_features"),
+    )
+    config["cv_checkpoint_fingerprint"] = fingerprint
+    for fold_number, (train_index, validation_index) in enumerate(StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state).split(X_train, y_train), 1):
+        if resume:
+            checkpoint = load_compatible_fold_checkpoint(
+                save_dir, fold_number, fingerprint, config, dimensions,
+            )
+            if checkpoint is not None:
+                cv_accuracy.append(checkpoint["validation_metrics"]["accuracy"])
+                balancing_audit.append(checkpoint["balancing_audit"])
+                continue
+        balance_start = time.perf_counter()
+        X_fold, y_fold, fold_audit = balance_training_fold(X_train[train_index], y_train[train_index], strategy="kmeans", k_neighbors=k_neighbors, random_state=random_state, rus_cap=rus_cap, return_audit=True)
+        fold_balancing_seconds = time.perf_counter() - balance_start
+        fold_audit.update({"phase": "cross_validation", "fold": fold_number})
+        balancing_audit.append(fold_audit)
+        training_start = time.perf_counter()
         model = _fit(model_name, X_fold, y_fold, classes, normal_index, device)
+        fold_training_seconds = time.perf_counter() - training_start
         prediction, _ = _predict(model, X_train[validation_index], device)
-        cv_accuracy.append(float(accuracy_score(y_train[validation_index], prediction)))
+        validation_metrics = {"accuracy": float(accuracy_score(y_train[validation_index], prediction))}
+        cv_accuracy.append(validation_metrics["accuracy"])
+        save_fold_checkpoint(save_dir, fold_number, validation_metrics, fold_audit,
+                             fold_balancing_seconds, fold_training_seconds, config,
+                             dimensions, fingerprint)
     start = time.perf_counter()
-    X_balanced, y_balanced = balance_full_train(X_train, y_train, strategy="kmeans", k_neighbors=k_neighbors, random_state=random_state, rus_cap=rus_cap)
+    X_balanced, y_balanced, final_audit = balance_full_train(X_train, y_train, strategy="kmeans", k_neighbors=k_neighbors, random_state=random_state, rus_cap=rus_cap, return_audit=True)
+    final_audit["phase"] = "final_retrain"
+    balancing_audit.append(final_audit)
     balancing_seconds = time.perf_counter() - start
     start = time.perf_counter(); model = _fit(model_name, X_balanced, y_balanced, classes, normal_index, device)
     training_seconds = time.perf_counter() - start
@@ -146,13 +177,13 @@ def run_dl_presplit_experiment(X_train, X_test, y_train, y_test, class_names, no
     binary_true, binary_pred = y_test != normal_index, prediction != normal_index
     metrics["binary_precision"] = precision_score(binary_true, binary_pred, zero_division=0)
     metrics["binary_recall"] = recall_score(binary_true, binary_pred, zero_division=0)
-    save_dir = os.path.join(results_root, experiment, model_name); os.makedirs(save_dir, exist_ok=True)
+    os.makedirs(save_dir, exist_ok=True)
     path = os.path.join(save_dir, "model.pt"); start = time.perf_counter()
     torch.save({"state_dict": model.state_dict(), "input_dimension": int(X_train.shape[1]), "num_classes": classes}, path)
     save_seconds = time.perf_counter() - start
     latency = _latency(path, model_name, X_train.shape[1], classes, X_test, device, training_seconds, balancing_seconds, preprocessing_seconds, save_seconds, normal_index)
     environment = {"cpu": platform.processor(), "gpu": str(device), "python": platform.python_version()}
-    for filename, payload in (("test_metrics.json", metrics), ("latency.json", latency), ("feature_dimensions.json", dimensions), ("resolved_config.json", config), ("environment.json", environment)):
+    for filename, payload in (("test_metrics.json", metrics), ("latency.json", latency), ("feature_dimensions.json", dimensions), ("resolved_config.json", config), ("environment.json", environment), ("balancing_audit.json", {"events": balancing_audit})):
         with open(os.path.join(save_dir, filename), "w", encoding="utf-8") as handle: json.dump(payload, handle, indent=2)
     if artifacts.get("selected_features") is not None:
         with open(os.path.join(save_dir, "selected_features.json"), "w", encoding="utf-8") as handle: json.dump(artifacts["selected_features"], handle, indent=2)
