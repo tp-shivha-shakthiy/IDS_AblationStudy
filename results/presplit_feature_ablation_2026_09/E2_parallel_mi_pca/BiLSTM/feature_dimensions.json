@@ -1,0 +1,7 @@
+{
+  "prepared_dimension": 43,
+  "mi_branch_dimension": 15,
+  "pca_branch_dimension": 15,
+  "concatenated_dimension": 30,
+  "final_dimension": 30
+}

@@ -2,7 +2,7 @@
   "balancing_audit": {
     "class_counts_after": {
       "0": 15008,
-      "1": 15006,
+      "1": 15005,
       "2": 15012,
       "3": 15000,
       "4": 15000,
@@ -41,7 +41,7 @@
     },
     "stage": "fold"
   },
-  "balancing_seconds": 5.125671222805977,
+  "balancing_seconds": 2.910783299943432,
   "checkpoint_schema_version": 1,
   "config_fingerprint": "a3f0ce268691f7d16ec32524a0818822efc36412974cb7791ef0e24ecb38f038",
   "experiment": "E1_sequential_mi_pca",
@@ -58,8 +58,8 @@
     "method": "stratified_80_20",
     "random_state": 42
   },
-  "training_seconds": 1.4907984733581543,
+  "training_seconds": 2.777227299986407,
   "validation_metrics": {
-    "accuracy": 0.9284830231762741
+    "accuracy": 0.9018250177777449
   }
 }

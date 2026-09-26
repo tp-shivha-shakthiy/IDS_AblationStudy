@@ -30,6 +30,10 @@ from src.evaluation import compute_extended_metrics, resolve_normal_class_idx
 from src.feature_selection import fit_mi_selector
 from src.model_training import MODEL_REGISTRY, _ensure_registry
 from src.preprocessing import feature_type_mask, fit_categorical_encoder, transform_features
+from src.presplit_feature_calibration import (
+    CalibrationError,
+    load_and_validate_frozen_calibration_manifest,
+)
 from src.presplit_ablation_models import DL_MODELS, run_dl_presplit_experiment
 from src.presplit_cv_checkpoints import (
     build_cv_config_fingerprint, load_compatible_fold_checkpoint,
@@ -39,7 +43,16 @@ from src.presplit_cv_checkpoints import (
 
 PROTOCOL = "presplit_feature_ablation"
 RESULTS_ROOT = os.path.join("results", "presplit_feature_ablation_2026_09")
-EXPERIMENTS = ("E1_sequential_mi_pca", "E2_parallel_mi_pca", "E3_spearman")
+CALIBRATED_RESULTS_ROOT = os.path.join(
+    "results", "presplit_feature_ablation_calibrated_2026_09"
+)
+EXPERIMENTS = (
+    "E1_sequential_mi_pca",
+    "E2_parallel_mi_pca",
+    "E3_spearman",
+    "E4_mi_only",
+    "E5_pca_only",
+)
 SPEARMAN_SELECTION_RULES = ("top_k", "absolute_threshold")
 
 
@@ -59,15 +72,41 @@ def validate_spearman_selection(rule, value):
         raise ValueError("Spearman absolute_threshold must be between 0 and 1.")
 
 
+def _fit_parallel_pca_branch(
+    X_prepared,
+    pca_variance=None,
+    random_state=42,
+    *,
+    pca_components=None,
+):
+    """Fit the independent PCA branch used by E2.
+
+    This deliberately operates on all prepared features, rather than on the
+    MI output.  E5 calls this same helper so it is an isolated E2 PCA control,
+    not a separately configured PCA experiment.
+    """
+    if (pca_variance is None) == (pca_components is None):
+        raise ValueError("Specify exactly one PCA variance threshold or component count.")
+    scaler = StandardScaler()
+    pca = PCA(
+        n_components=(pca_components if pca_components is not None else pca_variance),
+        random_state=random_state,
+    )
+    X_pca = pca.fit_transform(scaler.fit_transform(X_prepared))
+    return X_pca, scaler, pca
+
+
 def apply_presplit_feature_processing(
     X,
     y,
     experiment,
-    mi_k=15,
-    pca_variance=0.95,
+    mi_k=None,
+    pca_variance=None,
     random_state=42,
     spearman_selection_rule=None,
     spearman_selection_value=None,
+    pca_components=None,
+    prepared_context=None,
 ):
     """Fit the requested experiment transform on the complete prepared dataset."""
     if experiment not in EXPERIMENTS:
@@ -77,9 +116,21 @@ def apply_presplit_feature_processing(
             spearman_selection_rule,
             spearman_selection_value,
         )
+    if experiment in {"E1_sequential_mi_pca", "E2_parallel_mi_pca", "E4_mi_only"} and mi_k is None:
+        raise CalibrationError(
+            f"{experiment} requires an explicit MI k from a frozen calibration manifest."
+        )
+    if experiment in {"E1_sequential_mi_pca", "E2_parallel_mi_pca", "E5_pca_only"} and (
+        (pca_variance is None) == (pca_components is None)
+    ):
+        raise CalibrationError(
+            f"{experiment} requires exactly one explicit PCA parameter from a frozen calibration manifest."
+        )
 
     start = time.perf_counter()
-    if hasattr(X, "select_dtypes"):
+    if prepared_context is not None:
+        X_prepared, feature_names, discrete_mask, encoder = prepared_context
+    elif hasattr(X, "select_dtypes"):
         encoder = fit_categorical_encoder(X)
         feature_names = list(X.columns)
         X_prepared = transform_features(
@@ -155,6 +206,30 @@ def apply_presplit_feature_processing(
             time.perf_counter() - start,
         )
 
+    if experiment == "E5_pca_only":
+        X_final, scaler, pca = _fit_parallel_pca_branch(
+            X_prepared,
+            pca_variance if pca_components is None else None,
+            random_state,
+            pca_components=pca_components,
+        )
+        dimensions = {
+            "prepared_dimension": int(X_prepared.shape[1]),
+            "pca_dimension": int(X_final.shape[1]),
+            "final_dimension": int(X_final.shape[1]),
+        }
+        artifacts = {
+            "categorical_encoder": encoder,
+            "scaler": scaler,
+            "pca": pca,
+        }
+        return (
+            X_final.astype(np.float32),
+            dimensions,
+            artifacts,
+            time.perf_counter() - start,
+        )
+
     selector = fit_mi_selector(
         X_prepared,
         y,
@@ -172,9 +247,30 @@ def apply_presplit_feature_processing(
         ],
     }
 
+    if experiment == "E4_mi_only":
+        dimensions = {
+            "prepared_dimension": int(X_prepared.shape[1]),
+            "mi_dimension": int(X_mi.shape[1]),
+            "final_dimension": int(X_mi.shape[1]),
+        }
+        artifacts = {
+            "categorical_encoder": encoder,
+            "selector": selector,
+            "selected_features": selected_features,
+        }
+        return (
+            X_mi.astype(np.float32),
+            dimensions,
+            artifacts,
+            time.perf_counter() - start,
+        )
+
     if experiment == "E1_sequential_mi_pca":
         sequential_scaler = StandardScaler()
-        pca = PCA(n_components=pca_variance, random_state=random_state)
+        pca = PCA(
+            n_components=(pca_components if pca_components is not None else pca_variance),
+            random_state=random_state,
+        )
         X_final = pca.fit_transform(
             sequential_scaler.fit_transform(X_mi)
         )
@@ -191,11 +287,13 @@ def apply_presplit_feature_processing(
             "pca": pca,
             "selected_features": selected_features,
         }
-    else:
-        scaler = StandardScaler()
-        pca = PCA(n_components=pca_variance, random_state=random_state)
-        X_scaled = scaler.fit_transform(X_prepared)
-        X_pca = pca.fit_transform(X_scaled)
+    else:  # E2_parallel_mi_pca
+        X_pca, scaler, pca = _fit_parallel_pca_branch(
+            X_prepared,
+            pca_variance if pca_components is None else None,
+            random_state,
+            pca_components=pca_components,
+        )
         X_final = np.concatenate([X_mi, X_pca], axis=1)
         dimensions = {
             "prepared_dimension": int(X_prepared.shape[1]),
@@ -218,6 +316,74 @@ def apply_presplit_feature_processing(
         artifacts,
         time.perf_counter() - start,
     )
+
+
+def _expected_calibrated_dimensions(experiment, frozen):
+    """Derive final widths only from the loaded frozen calibration values."""
+    if experiment == "E1_sequential_mi_pca":
+        return frozen["pca_components"]
+    if experiment == "E2_parallel_mi_pca":
+        return frozen["mi_k"] + frozen["pca_components"]
+    if experiment == "E3_spearman":
+        return frozen["spearman_k"]
+    if experiment == "E4_mi_only":
+        return frozen["mi_k"]
+    if experiment == "E5_pca_only":
+        return frozen["pca_components"]
+    raise ValueError(f"Unsupported presplit experiment: {experiment}")
+
+
+def apply_calibrated_presplit_feature_processing(
+    X,
+    y,
+    class_names,
+    experiment,
+    calibration_manifest,
+):
+    """Apply a manifest-bound final transformation before the outer split."""
+    frozen = load_and_validate_frozen_calibration_manifest(
+        calibration_manifest,
+        X,
+        y,
+        class_names,
+    )
+    X_final, dimensions, artifacts, elapsed = apply_presplit_feature_processing(
+        X,
+        y,
+        experiment,
+        mi_k=frozen["mi_k"],
+        pca_variance=None,
+        pca_components=frozen["pca_components"],
+        random_state=42,
+        spearman_selection_rule=frozen["spearman_selection_rule"],
+        spearman_selection_value=frozen["spearman_k"],
+        prepared_context=frozen["prepared_context"],
+    )
+    expected_dimension = _expected_calibrated_dimensions(experiment, frozen)
+    if dimensions["prepared_dimension"] != frozen["prepared_dimension"]:
+        raise CalibrationError("Calibrated transformation prepared width disagrees with manifest.")
+    if dimensions["final_dimension"] != expected_dimension:
+        raise CalibrationError(
+            "Calibrated transformation final width disagrees with frozen manifest."
+        )
+
+    expected_features = []
+    if experiment == "E3_spearman":
+        expected_features = frozen["spearman_selected_features_rank_order"]
+    elif experiment in {"E1_sequential_mi_pca", "E2_parallel_mi_pca", "E4_mi_only"}:
+        expected_features = frozen["mi_selected_features_rank_order"]
+    selected = artifacts.get("selected_features", {}).get("selected_features", [])
+    if expected_features and set(selected) != set(expected_features):
+        method = "Spearman" if experiment == "E3_spearman" else "MI"
+        raise CalibrationError(
+            f"Recomputed {method} selected feature identities disagree with manifest."
+        )
+    artifacts["calibration_manifest"] = {
+        key: value
+        for key, value in frozen.items()
+        if key != "prepared_context"
+    }
+    return X_final, dimensions, artifacts, elapsed, frozen
 
 
 def _metrics(y_true, y_pred, y_proba, normal_class_idx):
@@ -348,31 +514,29 @@ def run_presplit_ablation_experiment(
     class_names,
     experiment,
     model_name="HGB",
-    mi_k=15,
-    pca_variance=0.95,
     n_splits=5,
     k_neighbors=3,
     rus_cap=0,
     random_state=42,
-    results_root=RESULTS_ROOT,
-    spearman_selection_rule=None,
-    spearman_selection_value=None,
+    results_root=CALIBRATED_RESULTS_ROOT,
+    calibration_manifest=None,
     resume=False,
 ):
     """Run one presplit experiment with one existing classical or DL architecture."""
+    if calibration_manifest is None:
+        raise CalibrationError(
+            "Final presplit ablations require a frozen calibration manifest."
+        )
     print("[1] Loading/preparing full dataset", flush=True)
     print("[2] Applying presplit feature processing", flush=True)
 
-    X_final, dimensions, artifacts, preprocessing_seconds = (
-        apply_presplit_feature_processing(
+    X_final, dimensions, artifacts, preprocessing_seconds, frozen = (
+        apply_calibrated_presplit_feature_processing(
             X,
             y,
+            class_names,
             experiment,
-            mi_k,
-            pca_variance,
-            random_state,
-            spearman_selection_rule,
-            spearman_selection_value,
+            calibration_manifest,
         )
     )
 
@@ -401,13 +565,24 @@ def run_presplit_ablation_experiment(
         "experiment": experiment,
         "model": model_name,
         "random_state": random_state,
-        "mi_k": mi_k,
-        "pca_variance": pca_variance,
+        "calibration": {
+            "source": frozen["manifest_path"],
+            "manifest_sha256": frozen["manifest_sha256"],
+            "protocol": frozen["protocol"],
+            "dataset_fingerprint": frozen["dataset_fingerprint"],
+            "prepared_dimension": frozen["prepared_dimension"],
+            "mi_k": frozen["mi_k"],
+            "pca_parameterization": frozen["pca_parameterization"],
+            "pca_components": frozen["pca_components"],
+            "spearman_selection_rule": frozen["spearman_selection_rule"],
+            "spearman_calibration_method": frozen["spearman_calibration_method"],
+            "spearman_k": frozen["spearman_k"],
+        },
         "n_splits": n_splits,
         "k_neighbors": k_neighbors,
         "rus_cap": rus_cap,
-        "spearman_selection_rule": spearman_selection_rule,
-        "spearman_selection_value": spearman_selection_value,
+        "spearman_selection_rule": frozen["spearman_selection_rule"],
+        "spearman_selection_value": frozen["spearman_k"],
         "split_method": "stratified_80_20",
         "test_size": 0.20,
         "balancer": "KMeansSMOTE",

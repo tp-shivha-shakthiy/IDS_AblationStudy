@@ -1,4 +1,5 @@
 """No-model preflight for the presplit feature-ablation protocol."""
+import argparse
 import ast
 import time
 from collections import Counter
@@ -8,7 +9,9 @@ from sklearn.model_selection import StratifiedKFold, train_test_split
 
 from src.balancing import balance_full_train, balance_training_fold
 from src.preprocessing import load_and_prepare
-from src.presplit_feature_ablation_protocol import apply_presplit_feature_processing
+from src.presplit_feature_ablation_protocol import (
+    apply_calibrated_presplit_feature_processing,
+)
 
 
 def counts(y):
@@ -16,10 +19,22 @@ def counts(y):
 
 
 def main():
-    X, y, _ = load_and_prepare("data/raw")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--data-dir", default="data/raw")
+    parser.add_argument("--cap", type=int, default=15000)
+    parser.add_argument(
+        "--calibration-manifest",
+        default="configs/presplit_feature_calibration.json",
+    )
+    args = parser.parse_args()
+    X, y, encoder = load_and_prepare(args.data_dir)
     print("Quick stratified subsamples are unsuitable for KMeansSMOTE validation because rare UNSW-NB15 attack classes become underrepresented.")
-    X_e1, e1_dimensions, _, _ = apply_presplit_feature_processing(X, y, "E1_sequential_mi_pca")
-    X_e2, e2_dimensions, _, _ = apply_presplit_feature_processing(X, y, "E2_parallel_mi_pca")
+    X_e1, e1_dimensions, _, _, _ = apply_calibrated_presplit_feature_processing(
+        X, y, list(encoder.classes_), "E1_sequential_mi_pca", args.calibration_manifest,
+    )
+    X_e2, e2_dimensions, _, _, _ = apply_calibrated_presplit_feature_processing(
+        X, y, list(encoder.classes_), "E2_parallel_mi_pca", args.calibration_manifest,
+    )
     indices = np.arange(len(y))
     train_idx, test_idx = train_test_split(indices, test_size=0.2, stratify=y, random_state=42)
     e1_train, e1_test = train_test_split(indices, test_size=0.2, stratify=y, random_state=42)
@@ -39,14 +54,14 @@ def main():
               "MIN_TRAIN", min(counts(y_fold).values()), "MIN_VALIDATION", min(counts(y_val).values()))
         start = time.perf_counter()
         try:
-            X_out, y_out = balance_training_fold(X_fold, y_fold, strategy="kmeans", k_neighbors=3, random_state=42, rus_cap=0)
+            X_out, y_out = balance_training_fold(X_fold, y_fold, strategy="kmeans", k_neighbors=3, random_state=42, rus_cap=args.cap)
             print(f"BALANCING PREFLIGHT FOLD {number}: PASS", X_fold.shape, counts(y_fold), X_out.shape, counts(y_out), time.perf_counter() - start)
         except Exception as exc:
             print(f"BALANCING PREFLIGHT FOLD {number}: FAIL", repr(exc), time.perf_counter() - start)
     X_train, y_train = X_e1[train_idx], y[train_idx]
     start = time.perf_counter()
     try:
-        X_out, y_out = balance_full_train(X_train, y_train, strategy="kmeans", k_neighbors=3, random_state=42, rus_cap=0)
+        X_out, y_out = balance_full_train(X_train, y_train, strategy="kmeans", k_neighbors=3, random_state=42, rus_cap=args.cap)
         print("FULL-TRAIN BALANCING: PASS", X_train.shape, counts(y_train), X_out.shape, counts(y_out), time.perf_counter() - start)
     except Exception as exc:
         print("FULL-TRAIN BALANCING: FAIL", repr(exc), time.perf_counter() - start)

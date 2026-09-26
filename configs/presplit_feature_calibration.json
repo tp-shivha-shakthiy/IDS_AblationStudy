@@ -1,0 +1,1859 @@
+{
+  "protocol": "presplit_feature_parameter_calibration_v1",
+  "calibration_algorithm": {
+    "version": 1,
+    "knee_method": "maximum_distance_to_endpoint_chord_normalized",
+    "tie_break": "smaller_k_when_distances_are_effectively_equal",
+    "failure_policy": "raise_CalibrationError_no_historical_default_fallback"
+  },
+  "timestamp_utc": "2026-09-20T05:54:53.639651+00:00",
+  "dataset": {
+    "files": [
+      {
+        "name": "UNSW-NB15_1.csv",
+        "bytes": 168979718
+      },
+      {
+        "name": "UNSW-NB15_2.csv",
+        "bytes": 165221021
+      },
+      {
+        "name": "UNSW-NB15_3.csv",
+        "bytes": 154588103
+      },
+      {
+        "name": "UNSW-NB15_4.csv",
+        "bytes": 97588754
+      }
+    ],
+    "row_count": 2540047,
+    "prepared_feature_fingerprint": "9f087eb5196e0a0b631747e0bd287455a06064ab522b4fd5f23c15af86349641"
+  },
+  "prepared_dimension": 43,
+  "feature_names": [
+    "sport",
+    "dsport",
+    "proto",
+    "state",
+    "dur",
+    "sbytes",
+    "dbytes",
+    "sttl",
+    "dttl",
+    "sloss",
+    "dloss",
+    "service",
+    "sload",
+    "dload",
+    "spkts",
+    "dpkts",
+    "swin",
+    "dwin",
+    "stcpb",
+    "dtcpb",
+    "smeansz",
+    "dmeansz",
+    "trans_depth",
+    "res_bdy_len",
+    "sjit",
+    "djit",
+    "sintpkt",
+    "dintpkt",
+    "tcprtt",
+    "synack",
+    "ackdat",
+    "is_sm_ips_ports",
+    "ct_state_ttl",
+    "ct_flw_http_mthd",
+    "is_ftp_login",
+    "ct_ftp_cmd",
+    "ct_srv_src",
+    "ct_srv_dst",
+    "ct_dst_ltm",
+    "ct_src_ltm",
+    "ct_src_dport_ltm",
+    "ct_dst_sport_ltm",
+    "ct_dst_src_ltm"
+  ],
+  "feature_name_order_hash": "b7fb568ff2aa91027b3efc4c2bb3f85b4ef373928971ce0da61d836e4691c372",
+  "class_names": [
+    "Analysis",
+    "Backdoor",
+    "DoS",
+    "Exploits",
+    "Fuzzers",
+    "Generic",
+    "Normal",
+    "Reconnaissance",
+    "Shellcode",
+    "Worms"
+  ],
+  "random_state": 42,
+  "environment": {
+    "python": "3.13.6 (tags/v3.13.6:4e66535, Aug  6 2025, 14:36:00) [MSC v.1944 64 bit (AMD64)]",
+    "numpy": "2.2.2",
+    "scipy": "1.17.1",
+    "scikit_learn": "1.6.1",
+    "platform": "Windows-11-10.0.26200-SP0"
+  },
+  "mi": {
+    "selection_method": "maximum_distance_to_endpoint_chord_normalized",
+    "maximum_distance": 0.2538659102707361,
+    "ranking": [
+      {
+        "rank": 1,
+        "feature_index": 7,
+        "feature": "sttl",
+        "score": 0.5755754277806214
+      },
+      {
+        "rank": 2,
+        "feature_index": 5,
+        "feature": "sbytes",
+        "score": 0.4561069921125711
+      },
+      {
+        "rank": 3,
+        "feature_index": 8,
+        "feature": "dttl",
+        "score": 0.44256180371728404
+      },
+      {
+        "rank": 4,
+        "feature_index": 12,
+        "feature": "sload",
+        "score": 0.3903335203791447
+      },
+      {
+        "rank": 5,
+        "feature_index": 20,
+        "feature": "smeansz",
+        "score": 0.3778775310601019
+      },
+      {
+        "rank": 6,
+        "feature_index": 32,
+        "feature": "ct_state_ttl",
+        "score": 0.3761758747890609
+      },
+      {
+        "rank": 7,
+        "feature_index": 41,
+        "feature": "ct_dst_sport_ltm",
+        "score": 0.33058311243919314
+      },
+      {
+        "rank": 8,
+        "feature_index": 40,
+        "feature": "ct_src_dport_ltm",
+        "score": 0.287608572885526
+      },
+      {
+        "rank": 9,
+        "feature_index": 6,
+        "feature": "dbytes",
+        "score": 0.26764521863312796
+      },
+      {
+        "rank": 10,
+        "feature_index": 21,
+        "feature": "dmeansz",
+        "score": 0.2458171499522448
+      },
+      {
+        "rank": 11,
+        "feature_index": 1,
+        "feature": "dsport",
+        "score": 0.24258794780776594
+      },
+      {
+        "rank": 12,
+        "feature_index": 15,
+        "feature": "dpkts",
+        "score": 0.2298500509334629
+      },
+      {
+        "rank": 13,
+        "feature_index": 4,
+        "feature": "dur",
+        "score": 0.22594921969681048
+      },
+      {
+        "rank": 14,
+        "feature_index": 13,
+        "feature": "dload",
+        "score": 0.22174894339039186
+      },
+      {
+        "rank": 15,
+        "feature_index": 42,
+        "feature": "ct_dst_src_ltm",
+        "score": 0.21989340272262736
+      },
+      {
+        "rank": 16,
+        "feature_index": 27,
+        "feature": "dintpkt",
+        "score": 0.2180584521975395
+      },
+      {
+        "rank": 17,
+        "feature_index": 0,
+        "feature": "sport",
+        "score": 0.21556583908080795
+      },
+      {
+        "rank": 18,
+        "feature_index": 16,
+        "feature": "swin",
+        "score": 0.19371366963072179
+      },
+      {
+        "rank": 19,
+        "feature_index": 17,
+        "feature": "dwin",
+        "score": 0.19272424706575286
+      },
+      {
+        "rank": 20,
+        "feature_index": 38,
+        "feature": "ct_dst_ltm",
+        "score": 0.1893211542208102
+      },
+      {
+        "rank": 21,
+        "feature_index": 37,
+        "feature": "ct_srv_dst",
+        "score": 0.17498182689828679
+      },
+      {
+        "rank": 22,
+        "feature_index": 3,
+        "feature": "state",
+        "score": 0.17262671710958394
+      },
+      {
+        "rank": 23,
+        "feature_index": 39,
+        "feature": "ct_src_ltm",
+        "score": 0.16863634048665044
+      },
+      {
+        "rank": 24,
+        "feature_index": 36,
+        "feature": "ct_srv_src",
+        "score": 0.16603254705996862
+      },
+      {
+        "rank": 25,
+        "feature_index": 26,
+        "feature": "sintpkt",
+        "score": 0.1638539407098334
+      },
+      {
+        "rank": 26,
+        "feature_index": 9,
+        "feature": "sloss",
+        "score": 0.16322600108958962
+      },
+      {
+        "rank": 27,
+        "feature_index": 14,
+        "feature": "spkts",
+        "score": 0.16226006779569824
+      },
+      {
+        "rank": 28,
+        "feature_index": 28,
+        "feature": "tcprtt",
+        "score": 0.15636656426993167
+      },
+      {
+        "rank": 29,
+        "feature_index": 29,
+        "feature": "synack",
+        "score": 0.15482657918442677
+      },
+      {
+        "rank": 30,
+        "feature_index": 30,
+        "feature": "ackdat",
+        "score": 0.15479452948288053
+      },
+      {
+        "rank": 31,
+        "feature_index": 24,
+        "feature": "sjit",
+        "score": 0.132121872807474
+      },
+      {
+        "rank": 32,
+        "feature_index": 2,
+        "feature": "proto",
+        "score": 0.131374615503536
+      },
+      {
+        "rank": 33,
+        "feature_index": 10,
+        "feature": "dloss",
+        "score": 0.13104441970123415
+      },
+      {
+        "rank": 34,
+        "feature_index": 25,
+        "feature": "djit",
+        "score": 0.12861625698793522
+      },
+      {
+        "rank": 35,
+        "feature_index": 11,
+        "feature": "service",
+        "score": 0.11738506511390775
+      },
+      {
+        "rank": 36,
+        "feature_index": 18,
+        "feature": "stcpb",
+        "score": 0.08327780307009403
+      },
+      {
+        "rank": 37,
+        "feature_index": 19,
+        "feature": "dtcpb",
+        "score": 0.08172374533113214
+      },
+      {
+        "rank": 38,
+        "feature_index": 23,
+        "feature": "res_bdy_len",
+        "score": 0.026291809517800857
+      },
+      {
+        "rank": 39,
+        "feature_index": 33,
+        "feature": "ct_flw_http_mthd",
+        "score": 0.016065767879265724
+      },
+      {
+        "rank": 40,
+        "feature_index": 22,
+        "feature": "trans_depth",
+        "score": 0.015827039810877297
+      },
+      {
+        "rank": 41,
+        "feature_index": 35,
+        "feature": "ct_ftp_cmd",
+        "score": 0.002728162215478447
+      },
+      {
+        "rank": 42,
+        "feature_index": 34,
+        "feature": "is_ftp_login",
+        "score": 0.0025901816897708763
+      },
+      {
+        "rank": 43,
+        "feature_index": 31,
+        "feature": "is_sm_ips_ports",
+        "score": 0.00038854784450848
+      }
+    ],
+    "normalized_curve": [
+      {
+        "rank": 1,
+        "normalized_rank": 0.0,
+        "normalized_value": 1.0,
+        "distance_to_chord": 0.0
+      },
+      {
+        "rank": 2,
+        "normalized_rank": 0.023809523809523808,
+        "normalized_value": 0.7922963130151371,
+        "distance_to_chord": 0.13003280980190773
+      },
+      {
+        "rank": 3,
+        "normalized_rank": 0.047619047619047616,
+        "normalized_value": 0.7687471173227883,
+        "distance_to_chord": 0.12984873002491976
+      },
+      {
+        "rank": 4,
+        "normalized_rank": 0.07142857142857142,
+        "normalized_value": 0.677944831735293,
+        "distance_to_chord": 0.1772197661685384
+      },
+      {
+        "rank": 5,
+        "normalized_rank": 0.09523809523809523,
+        "normalized_value": 0.6562892798554825,
+        "distance_to_chord": 0.17569667801055264
+      },
+      {
+        "rank": 6,
+        "normalized_rank": 0.11904761904761904,
+        "normalized_value": 0.6533308391635981,
+        "distance_to_chord": 0.16095273574298544
+      },
+      {
+        "rank": 7,
+        "normalized_rank": 0.14285714285714285,
+        "normalized_value": 0.5740648406851004,
+        "distance_to_chord": 0.20016638504211687
+      },
+      {
+        "rank": 8,
+        "normalized_rank": 0.16666666666666666,
+        "normalized_value": 0.49935079373319424,
+        "distance_to_chord": 0.236161318549163
+      },
+      {
+        "rank": 9,
+        "normalized_rank": 0.19047619047619047,
+        "normalized_value": 0.4646431970393764,
+        "distance_to_chord": 0.24386741978751253
+      },
+      {
+        "rank": 10,
+        "normalized_rank": 0.21428571428571427,
+        "normalized_value": 0.42669367238521944,
+        "distance_to_chord": 0.2538659102707361
+      },
+      {
+        "rank": 11,
+        "normalized_rank": 0.23809523809523808,
+        "normalized_value": 0.4210794933120849,
+        "distance_to_chord": 0.2409998586216083
+      },
+      {
+        "rank": 12,
+        "normalized_rank": 0.26190476190476186,
+        "normalized_value": 0.39893382671461686,
+        "distance_to_chord": 0.2398233339040376
+      },
+      {
+        "rank": 13,
+        "normalized_rank": 0.2857142857142857,
+        "normalized_value": 0.3921519765495267,
+        "distance_to_chord": 0.22778295040222707
+      },
+      {
+        "rank": 14,
+        "normalized_rank": 0.30952380952380953,
+        "normalized_value": 0.3848495215511005,
+        "distance_to_chord": 0.21611069010838696
+      },
+      {
+        "rank": 15,
+        "normalized_rank": 0.3333333333333333,
+        "normalized_value": 0.3816235427736107,
+        "distance_to_chord": 0.20155592583537704
+      },
+      {
+        "rank": 16,
+        "normalized_rank": 0.3571428571428571,
+        "normalized_value": 0.37843336130547345,
+        "distance_to_chord": 0.18697584904217576
+      },
+      {
+        "rank": 17,
+        "normalized_rank": 0.38095238095238093,
+        "normalized_value": 0.3740997904197669,
+        "distance_to_chord": 0.17320427065967456
+      },
+      {
+        "rank": 18,
+        "normalized_rank": 0.40476190476190477,
+        "normalized_value": 0.33610836500249497,
+        "distance_to_chord": 0.18323238945663367
+      },
+      {
+        "rank": 19,
+        "normalized_rank": 0.42857142857142855,
+        "normalized_value": 0.33438818917880647,
+        "distance_to_chord": 0.1676128617038601
+      },
+      {
+        "rank": 20,
+        "normalized_rank": 0.45238095238095233,
+        "normalized_value": 0.3284716897528796,
+        "distance_to_chord": 0.15496058282628247
+      },
+      {
+        "rank": 21,
+        "normalized_rank": 0.47619047619047616,
+        "normalized_value": 0.3035418316098773,
+        "distance_to_chord": 0.15575277883068128
+      },
+      {
+        "rank": 22,
+        "normalized_rank": 0.5,
+        "normalized_value": 0.29944731925075596,
+        "distance_to_chord": 0.14181216054293122
+      },
+      {
+        "rank": 23,
+        "normalized_rank": 0.5238095238095237,
+        "normalized_value": 0.29250978857659193,
+        "distance_to_chord": 0.1298818597847855
+      },
+      {
+        "rank": 24,
+        "normalized_rank": 0.5476190476190476,
+        "normalized_value": 0.28798292345238913,
+        "distance_to_chord": 0.11624696106908929
+      },
+      {
+        "rank": 25,
+        "normalized_rank": 0.5714285714285714,
+        "normalized_value": 0.28419527386209037,
+        "distance_to_chord": 0.10208935803661119
+      },
+      {
+        "rank": 26,
+        "normalized_rank": 0.5952380952380952,
+        "normalized_value": 0.28310355977376916,
+        "distance_to_chord": 0.08602544072904307
+      },
+      {
+        "rank": 27,
+        "normalized_rank": 0.6190476190476191,
+        "normalized_value": 0.281424221583721,
+        "distance_to_chord": 0.07037703640859481
+      },
+      {
+        "rank": 28,
+        "normalized_rank": 0.6428571428571428,
+        "normalized_value": 0.2711779803509217,
+        "distance_to_chord": 0.060786347323443596
+      },
+      {
+        "rank": 29,
+        "normalized_rank": 0.6666666666666666,
+        "normalized_value": 0.26850061558614136,
+        "distance_to_chord": 0.0458436543617929
+      },
+      {
+        "rank": 30,
+        "normalized_rank": 0.6904761904761905,
+        "normalized_value": 0.26844489508439795,
+        "distance_to_chord": 0.029047178963889912
+      },
+      {
+        "rank": 31,
+        "normalized_rank": 0.7142857142857142,
+        "normalized_value": 0.22902699897744083,
+        "distance_to_chord": 0.040083964858689314
+      },
+      {
+        "rank": 32,
+        "normalized_rank": 0.738095238095238,
+        "normalized_value": 0.22772784329429832,
+        "distance_to_chord": 0.024166730909519582
+      },
+      {
+        "rank": 33,
+        "normalized_rank": 0.7619047619047619,
+        "normalized_value": 0.2271537763017784,
+        "distance_to_chord": 0.007736781830248936
+      },
+      {
+        "rank": 34,
+        "normalized_rank": 0.7857142857142857,
+        "normalized_value": 0.2229322566566004,
+        "distance_to_chord": 0.006114028744270393
+      },
+      {
+        "rank": 35,
+        "normalized_rank": 0.8095238095238095,
+        "normalized_value": 0.20340609521968633,
+        "distance_to_chord": 0.009142823324222034
+      },
+      {
+        "rank": 36,
+        "normalized_rank": 0.8333333333333333,
+        "normalized_value": 0.14410839001541934,
+        "distance_to_chord": 0.01595111039197922
+      },
+      {
+        "rank": 37,
+        "normalized_rank": 0.8571428571428571,
+        "normalized_value": 0.14140655902244798,
+        "distance_to_chord": 0.0010257176661923313
+      },
+      {
+        "rank": 38,
+        "normalized_rank": 0.8809523809523809,
+        "normalized_value": 0.04503451413246683,
+        "distance_to_chord": 0.05233516838217553
+      },
+      {
+        "rank": 39,
+        "normalized_rank": 0.9047619047619047,
+        "normalized_value": 0.027255872102817335,
+        "distance_to_chord": 0.04807069097909208
+      },
+      {
+        "rank": 40,
+        "normalized_rank": 0.9285714285714285,
+        "normalized_value": 0.02684082774642495,
+        "distance_to_chord": 0.03152829591545348
+      },
+      {
+        "rank": 41,
+        "normalized_rank": 0.9523809523809523,
+        "normalized_value": 0.0040675725622076634,
+        "distance_to_chord": 0.030795543343368332
+      },
+      {
+        "rank": 42,
+        "normalized_rank": 0.9761904761904762,
+        "normalized_value": 0.0038276843962555887,
+        "distance_to_chord": 0.014129294149702605
+      },
+      {
+        "rank": 43,
+        "normalized_rank": 1.0,
+        "normalized_value": 0.0,
+        "distance_to_chord": 0.0
+      }
+    ],
+    "selected_k": 10,
+    "selected_indices_rank_order": [
+      7,
+      5,
+      8,
+      12,
+      20,
+      32,
+      41,
+      40,
+      6,
+      21
+    ],
+    "selected_features_rank_order": [
+      "sttl",
+      "sbytes",
+      "dttl",
+      "sload",
+      "smeansz",
+      "ct_state_ttl",
+      "ct_dst_sport_ltm",
+      "ct_src_dport_ltm",
+      "dbytes",
+      "dmeansz"
+    ],
+    "score_method": "existing_fit_mi_selector_all_features",
+    "random_state": 42,
+    "n_neighbors": 3,
+    "discrete_feature_mask": [
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ],
+    "all_feature_scores": [
+      0.21556583908080795,
+      0.24258794780776594,
+      0.131374615503536,
+      0.17262671710958394,
+      0.22594921969681048,
+      0.4561069921125711,
+      0.26764521863312796,
+      0.5755754277806214,
+      0.44256180371728404,
+      0.16322600108958962,
+      0.13104441970123415,
+      0.11738506511390775,
+      0.3903335203791447,
+      0.22174894339039186,
+      0.16226006779569824,
+      0.2298500509334629,
+      0.19371366963072179,
+      0.19272424706575286,
+      0.08327780307009403,
+      0.08172374533113214,
+      0.3778775310601019,
+      0.2458171499522448,
+      0.015827039810877297,
+      0.026291809517800857,
+      0.132121872807474,
+      0.12861625698793522,
+      0.1638539407098334,
+      0.2180584521975395,
+      0.15636656426993167,
+      0.15482657918442677,
+      0.15479452948288053,
+      0.00038854784450848,
+      0.3761758747890609,
+      0.016065767879265724,
+      0.0025901816897708763,
+      0.002728162215478447,
+      0.16603254705996862,
+      0.17498182689828679,
+      0.1893211542208102,
+      0.16863634048665044,
+      0.287608572885526,
+      0.33058311243919314,
+      0.21989340272262736
+    ]
+  },
+  "pca": {
+    "selection_method": "maximum_distance_to_endpoint_chord_normalized",
+    "input_branch": "E2/E5 independent PCA branch: StandardScaler -> PCA",
+    "random_state": 42,
+    "maximum_distance": 0.5424243248962282,
+    "selected_component_count": 5,
+    "selected_cumulative_variance": 0.7360358275473118,
+    "recommended_frozen_parameterization": "component_count",
+    "recommendation_reason": "A fixed component count keeps the PCA contribution comparable between E1's post-MI PCA and E2/E5's independent PCA branch; the final protocol must reject a count exceeding E1's frozen MI width.",
+    "components": [
+      {
+        "component": 1,
+        "explained_variance_ratio": 0.3871699869632721,
+        "cumulative_explained_variance_ratio": 0.3871699869632721
+      },
+      {
+        "component": 2,
+        "explained_variance_ratio": 0.11936754733324051,
+        "cumulative_explained_variance_ratio": 0.5065375342965126
+      },
+      {
+        "component": 3,
+        "explained_variance_ratio": 0.10593189299106598,
+        "cumulative_explained_variance_ratio": 0.6124694272875786
+      },
+      {
+        "component": 4,
+        "explained_variance_ratio": 0.07026910036802292,
+        "cumulative_explained_variance_ratio": 0.6827385276556015
+      },
+      {
+        "component": 5,
+        "explained_variance_ratio": 0.05329729989171028,
+        "cumulative_explained_variance_ratio": 0.7360358275473118
+      },
+      {
+        "component": 6,
+        "explained_variance_ratio": 0.04721938818693161,
+        "cumulative_explained_variance_ratio": 0.7832552157342434
+      },
+      {
+        "component": 7,
+        "explained_variance_ratio": 0.040376704186201096,
+        "cumulative_explained_variance_ratio": 0.8236319199204445
+      },
+      {
+        "component": 8,
+        "explained_variance_ratio": 0.03194287419319153,
+        "cumulative_explained_variance_ratio": 0.855574794113636
+      },
+      {
+        "component": 9,
+        "explained_variance_ratio": 0.0253769401460886,
+        "cumulative_explained_variance_ratio": 0.8809517342597246
+      },
+      {
+        "component": 10,
+        "explained_variance_ratio": 0.0205390602350235,
+        "cumulative_explained_variance_ratio": 0.9014907944947481
+      },
+      {
+        "component": 11,
+        "explained_variance_ratio": 0.016924051567912102,
+        "cumulative_explained_variance_ratio": 0.9184148460626602
+      },
+      {
+        "component": 12,
+        "explained_variance_ratio": 0.013264995999634266,
+        "cumulative_explained_variance_ratio": 0.9316798420622945
+      },
+      {
+        "component": 13,
+        "explained_variance_ratio": 0.00972700770944357,
+        "cumulative_explained_variance_ratio": 0.941406849771738
+      },
+      {
+        "component": 14,
+        "explained_variance_ratio": 0.008196011185646057,
+        "cumulative_explained_variance_ratio": 0.9496028609573841
+      },
+      {
+        "component": 15,
+        "explained_variance_ratio": 0.00648967269808054,
+        "cumulative_explained_variance_ratio": 0.9560925336554646
+      },
+      {
+        "component": 16,
+        "explained_variance_ratio": 0.0054460251703858376,
+        "cumulative_explained_variance_ratio": 0.9615385588258505
+      },
+      {
+        "component": 17,
+        "explained_variance_ratio": 0.00500860158354044,
+        "cumulative_explained_variance_ratio": 0.9665471604093909
+      },
+      {
+        "component": 18,
+        "explained_variance_ratio": 0.004496662877500057,
+        "cumulative_explained_variance_ratio": 0.971043823286891
+      },
+      {
+        "component": 19,
+        "explained_variance_ratio": 0.00439510028809309,
+        "cumulative_explained_variance_ratio": 0.9754389235749841
+      },
+      {
+        "component": 20,
+        "explained_variance_ratio": 0.0035621882416307926,
+        "cumulative_explained_variance_ratio": 0.9790011118166149
+      },
+      {
+        "component": 21,
+        "explained_variance_ratio": 0.0027967914938926697,
+        "cumulative_explained_variance_ratio": 0.9817979033105075
+      },
+      {
+        "component": 22,
+        "explained_variance_ratio": 0.0024556333664804697,
+        "cumulative_explained_variance_ratio": 0.984253536676988
+      },
+      {
+        "component": 23,
+        "explained_variance_ratio": 0.0022932279389351606,
+        "cumulative_explained_variance_ratio": 0.9865467646159232
+      },
+      {
+        "component": 24,
+        "explained_variance_ratio": 0.0022840434685349464,
+        "cumulative_explained_variance_ratio": 0.9888308080844581
+      },
+      {
+        "component": 25,
+        "explained_variance_ratio": 0.0016846091020852327,
+        "cumulative_explained_variance_ratio": 0.9905154171865433
+      },
+      {
+        "component": 26,
+        "explained_variance_ratio": 0.0016179882222786546,
+        "cumulative_explained_variance_ratio": 0.992133405408822
+      },
+      {
+        "component": 27,
+        "explained_variance_ratio": 0.0014511896297335625,
+        "cumulative_explained_variance_ratio": 0.9935845950385556
+      },
+      {
+        "component": 28,
+        "explained_variance_ratio": 0.001131677534431219,
+        "cumulative_explained_variance_ratio": 0.9947162725729868
+      },
+      {
+        "component": 29,
+        "explained_variance_ratio": 0.0010176465148106217,
+        "cumulative_explained_variance_ratio": 0.9957339190877974
+      },
+      {
+        "component": 30,
+        "explained_variance_ratio": 0.0009295826894231141,
+        "cumulative_explained_variance_ratio": 0.9966635017772205
+      },
+      {
+        "component": 31,
+        "explained_variance_ratio": 0.0008934107609093189,
+        "cumulative_explained_variance_ratio": 0.9975569125381298
+      },
+      {
+        "component": 32,
+        "explained_variance_ratio": 0.0005998046253807843,
+        "cumulative_explained_variance_ratio": 0.9981567171635106
+      },
+      {
+        "component": 33,
+        "explained_variance_ratio": 0.0005405984120443463,
+        "cumulative_explained_variance_ratio": 0.998697315575555
+      },
+      {
+        "component": 34,
+        "explained_variance_ratio": 0.00045786143164150417,
+        "cumulative_explained_variance_ratio": 0.9991551770071965
+      },
+      {
+        "component": 35,
+        "explained_variance_ratio": 0.0003318176604807377,
+        "cumulative_explained_variance_ratio": 0.9994869946676772
+      },
+      {
+        "component": 36,
+        "explained_variance_ratio": 0.00015704437100794166,
+        "cumulative_explained_variance_ratio": 0.9996440390386852
+      },
+      {
+        "component": 37,
+        "explained_variance_ratio": 0.00011101229029009119,
+        "cumulative_explained_variance_ratio": 0.9997550513289752
+      },
+      {
+        "component": 38,
+        "explained_variance_ratio": 9.521887841401622e-05,
+        "cumulative_explained_variance_ratio": 0.9998502702073893
+      },
+      {
+        "component": 39,
+        "explained_variance_ratio": 5.940749906585552e-05,
+        "cumulative_explained_variance_ratio": 0.9999096777064551
+      },
+      {
+        "component": 40,
+        "explained_variance_ratio": 4.487684782361612e-05,
+        "cumulative_explained_variance_ratio": 0.9999545545542787
+      },
+      {
+        "component": 41,
+        "explained_variance_ratio": 4.2564810428302735e-05,
+        "cumulative_explained_variance_ratio": 0.999997119364707
+      },
+      {
+        "component": 42,
+        "explained_variance_ratio": 2.591694510556408e-06,
+        "cumulative_explained_variance_ratio": 0.9999997110592176
+      },
+      {
+        "component": 43,
+        "explained_variance_ratio": 2.638452940573188e-07,
+        "cumulative_explained_variance_ratio": 0.9999999749045116
+      }
+    ],
+    "normalized_curve": [
+      {
+        "rank": 1,
+        "normalized_rank": 0.0,
+        "normalized_value": 1.0,
+        "distance_to_chord": 0.0
+      },
+      {
+        "rank": 2,
+        "normalized_rank": 0.023809523809523808,
+        "normalized_value": 0.3083073813898742,
+        "distance_to_chord": 0.47226466537336337
+      },
+      {
+        "rank": 3,
+        "normalized_rank": 0.047619047619047616,
+        "normalized_value": 0.27360514735676406,
+        "distance_to_chord": 0.47996697463796134
+      },
+      {
+        "rank": 4,
+        "normalized_rank": 0.07142857142857142,
+        "normalized_value": 0.18149362495815977,
+        "distance_to_chord": 0.5282637810088942
+      },
+      {
+        "rank": 5,
+        "normalized_rank": 0.09523809523809523,
+        "normalized_value": 0.1376580679325888,
+        "distance_to_chord": 0.5424243248962282
+      },
+      {
+        "rank": 6,
+        "normalized_rank": 0.11904761904761904,
+        "normalized_value": 0.12195975439755391,
+        "distance_to_chord": 0.536688833107507
+      },
+      {
+        "rank": 7,
+        "normalized_rank": 0.14285714285714285,
+        "normalized_value": 0.10428615134402842,
+        "distance_to_chord": 0.5323500819321173
+      },
+      {
+        "rank": 8,
+        "normalized_rank": 0.16666666666666666,
+        "normalized_value": 0.08250286228648088,
+        "distance_to_chord": 0.5309173175987191
+      },
+      {
+        "rank": 9,
+        "normalized_rank": 0.19047619047619047,
+        "normalized_value": 0.06554406190760372,
+        "distance_to_chord": 0.5260731246048752
+      },
+      {
+        "rank": 10,
+        "normalized_rank": 0.21428571428571427,
+        "normalized_value": 0.05304856026531516,
+        "distance_to_chord": 0.5180729028079283
+      },
+      {
+        "rank": 11,
+        "normalized_rank": 0.23809523809523808,
+        "normalized_value": 0.04371154744830355,
+        "distance_to_chord": 0.5078392921443261
+      },
+      {
+        "rank": 12,
+        "normalized_rank": 0.26190476190476186,
+        "normalized_value": 0.034260768242712486,
+        "distance_to_chord": 0.4976861264655595
+      },
+      {
+        "rank": 13,
+        "normalized_rank": 0.2857142857142857,
+        "normalized_value": 0.025122687243768767,
+        "distance_to_chord": 0.48731184976440767
+      },
+      {
+        "rank": 14,
+        "normalized_rank": 0.30952380952380953,
+        "normalized_value": 0.021168358089443368,
+        "distance_to_chord": 0.47327210698193795
+      },
+      {
+        "rank": 15,
+        "normalized_rank": 0.3333333333333333,
+        "normalized_value": 0.016761147541511232,
+        "distance_to_chord": 0.45955259970396084
+      },
+      {
+        "rank": 16,
+        "normalized_rank": 0.3571428571428571,
+        "normalized_value": 0.014065566081034576,
+        "distance_to_chord": 0.4446227878913678
+      },
+      {
+        "rank": 17,
+        "normalized_rank": 0.38095238095238093,
+        "normalized_value": 0.012935768060355912,
+        "distance_to_chord": 0.42858579999062396
+      },
+      {
+        "rank": 18,
+        "normalized_rank": 0.40476190476190477,
+        "normalized_value": 0.011613508917989077,
+        "distance_to_chord": 0.4126849026541406
+      },
+      {
+        "rank": 19,
+        "normalized_rank": 0.42857142857142855,
+        "normalized_value": 0.011351188330033343,
+        "distance_to_chord": 0.39603451557819214
+      },
+      {
+        "rank": 20,
+        "normalized_rank": 0.45238095238095233,
+        "normalized_value": 0.009199904289136134,
+        "distance_to_chord": 0.38071982736923216
+      },
+      {
+        "rank": 21,
+        "normalized_rank": 0.47619047619047616,
+        "normalized_value": 0.007223001907477297,
+        "distance_to_chord": 0.36528183270651005
+      },
+      {
+        "rank": 22,
+        "normalized_rank": 0.5,
+        "normalized_value": 0.006341842800652607,
+        "distance_to_chord": 0.3490690305437132
+      },
+      {
+        "rank": 23,
+        "normalized_rank": 0.5238095238095237,
+        "normalized_value": 0.005922374495544925,
+        "distance_to_chord": 0.3325297636842109
+      },
+      {
+        "rank": 24,
+        "normalized_rank": 0.5476190476190476,
+        "normalized_value": 0.0058986524174695805,
+        "distance_to_chord": 0.31571066198394493
+      },
+      {
+        "rank": 25,
+        "normalized_rank": 0.5714285714285714,
+        "normalized_value": 0.004350405406772789,
+        "distance_to_chord": 0.2999695622016236
+      },
+      {
+        "rank": 26,
+        "normalized_rank": 0.5952380952380952,
+        "normalized_value": 0.004178333894387825,
+        "distance_to_chord": 0.28325535939234314
+      },
+      {
+        "rank": 27,
+        "normalized_rank": 0.6190476190476191,
+        "normalized_value": 0.0037475187180310075,
+        "distance_to_chord": 0.2667241159824462
+      },
+      {
+        "rank": 28,
+        "normalized_rank": 0.6428571428571428,
+        "normalized_value": 0.0029222679914782447,
+        "distance_to_chord": 0.2504717806248341
+      },
+      {
+        "rank": 29,
+        "normalized_rank": 0.6666666666666666,
+        "normalized_value": 0.002627743361033808,
+        "distance_to_chord": 0.23384416524571094
+      },
+      {
+        "rank": 30,
+        "normalized_rank": 0.6904761904761905,
+        "normalized_value": 0.0024002880097261,
+        "distance_to_chord": 0.21716912472450087
+      },
+      {
+        "rank": 31,
+        "normalized_rank": 0.7142857142857142,
+        "normalized_value": 0.0023068614674270453,
+        "distance_to_chord": 0.20039931152356655
+      },
+      {
+        "rank": 32,
+        "normalized_rank": 0.738095238095238,
+        "normalized_value": 0.0015485218607965256,
+        "distance_to_chord": 0.18409966285932047
+      },
+      {
+        "rank": 33,
+        "normalized_rank": 0.7619047619047619,
+        "normalized_value": 0.001395601294437062,
+        "distance_to_chord": 0.16737191828623932
+      },
+      {
+        "rank": 34,
+        "normalized_rank": 0.7857142857142857,
+        "normalized_value": 0.001181904366545749,
+        "distance_to_chord": 0.15068714909053313
+      },
+      {
+        "rank": 35,
+        "normalized_rank": 0.8095238095238095,
+        "normalized_value": 0.0008563526417215469,
+        "distance_to_chord": 0.1340814731802464
+      },
+      {
+        "rank": 36,
+        "normalized_rank": 0.8333333333333333,
+        "normalized_value": 0.00040494004658032186,
+        "distance_to_chord": 0.11756479434484703
+      },
+      {
+        "rank": 37,
+        "normalized_rank": 0.8571428571428571,
+        "normalized_value": 0.00028604624376138703,
+        "distance_to_chord": 0.10081298921652448
+      },
+      {
+        "rank": 38,
+        "normalized_rank": 0.8809523809523809,
+        "normalized_value": 0.0002452542837163542,
+        "distance_to_chord": 0.08400595774555335
+      },
+      {
+        "rank": 39,
+        "normalized_rank": 0.9047619047619047,
+        "normalized_value": 0.00015275898460111767,
+        "distance_to_chord": 0.06723548605624885
+      },
+      {
+        "rank": 40,
+        "normalized_rank": 0.9285714285714285,
+        "normalized_value": 0.00011522854155608744,
+        "distance_to_chord": 0.05042614834449004
+      },
+      {
+        "rank": 41,
+        "normalized_rank": 0.9523809523809523,
+        "normalized_value": 0.0001092569036483142,
+        "distance_to_chord": 0.03359449518761259
+      },
+      {
+        "rank": 42,
+        "normalized_rank": 0.9761904761904762,
+        "normalized_value": 6.01247741624091e-06,
+        "distance_to_chord": 0.016831624278984086
+      },
+      {
+        "rank": 43,
+        "normalized_rank": 1.0,
+        "normalized_value": 0.0,
+        "distance_to_chord": 0.0
+      }
+    ],
+    "component_count_within_selected_mi_width": true
+  },
+  "spearman": {
+    "selection_method": "maximum_distance_to_endpoint_chord_normalized",
+    "maximum_distance": 0.2865340334713749,
+    "ranking": [
+      {
+        "rank": 1,
+        "feature_index": 32,
+        "feature": "ct_state_ttl",
+        "score": 0.8410110230337684
+      },
+      {
+        "rank": 2,
+        "feature_index": 7,
+        "feature": "sttl",
+        "score": 0.6828164497886134
+      },
+      {
+        "rank": 3,
+        "feature_index": 41,
+        "feature": "ct_dst_sport_ltm",
+        "score": 0.47579574911663447
+      },
+      {
+        "rank": 4,
+        "feature_index": 3,
+        "feature": "state",
+        "score": 0.44678001833992004
+      },
+      {
+        "rank": 5,
+        "feature_index": 13,
+        "feature": "dload",
+        "score": 0.44289266762438295
+      },
+      {
+        "rank": 6,
+        "feature_index": 8,
+        "feature": "dttl",
+        "score": 0.4076136175471832
+      },
+      {
+        "rank": 7,
+        "feature_index": 40,
+        "feature": "ct_src_dport_ltm",
+        "score": 0.4061474365539377
+      },
+      {
+        "rank": 8,
+        "feature_index": 21,
+        "feature": "dmeansz",
+        "score": 0.40428685193368685
+      },
+      {
+        "rank": 9,
+        "feature_index": 6,
+        "feature": "dbytes",
+        "score": 0.3942670977800463
+      },
+      {
+        "rank": 10,
+        "feature_index": 15,
+        "feature": "dpkts",
+        "score": 0.39133316478263586
+      },
+      {
+        "rank": 11,
+        "feature_index": 5,
+        "feature": "sbytes",
+        "score": 0.38710245359884143
+      },
+      {
+        "rank": 12,
+        "feature_index": 42,
+        "feature": "ct_dst_src_ltm",
+        "score": 0.3592346390815619
+      },
+      {
+        "rank": 13,
+        "feature_index": 27,
+        "feature": "dintpkt",
+        "score": 0.3162588590156334
+      },
+      {
+        "rank": 14,
+        "feature_index": 14,
+        "feature": "spkts",
+        "score": 0.3092073734939606
+      },
+      {
+        "rank": 15,
+        "feature_index": 4,
+        "feature": "dur",
+        "score": 0.30031217235762353
+      },
+      {
+        "rank": 16,
+        "feature_index": 16,
+        "feature": "swin",
+        "score": 0.29720991390510276
+      },
+      {
+        "rank": 17,
+        "feature_index": 17,
+        "feature": "dwin",
+        "score": 0.2961341520073432
+      },
+      {
+        "rank": 18,
+        "feature_index": 1,
+        "feature": "dsport",
+        "score": 0.29226583209705914
+      },
+      {
+        "rank": 19,
+        "feature_index": 10,
+        "feature": "dloss",
+        "score": 0.29141716343030566
+      },
+      {
+        "rank": 20,
+        "feature_index": 9,
+        "feature": "sloss",
+        "score": 0.2836622582446814
+      },
+      {
+        "rank": 21,
+        "feature_index": 12,
+        "feature": "sload",
+        "score": 0.282102502377683
+      },
+      {
+        "rank": 22,
+        "feature_index": 36,
+        "feature": "ct_srv_src",
+        "score": 0.2773480891952372
+      },
+      {
+        "rank": 23,
+        "feature_index": 37,
+        "feature": "ct_srv_dst",
+        "score": 0.27530131634916943
+      },
+      {
+        "rank": 24,
+        "feature_index": 19,
+        "feature": "dtcpb",
+        "score": 0.26209753084811227
+      },
+      {
+        "rank": 25,
+        "feature_index": 18,
+        "feature": "stcpb",
+        "score": 0.26192822100814683
+      },
+      {
+        "rank": 26,
+        "feature_index": 25,
+        "feature": "djit",
+        "score": 0.260944277934862
+      },
+      {
+        "rank": 27,
+        "feature_index": 20,
+        "feature": "smeansz",
+        "score": 0.2597212953194604
+      },
+      {
+        "rank": 28,
+        "feature_index": 26,
+        "feature": "sintpkt",
+        "score": 0.2511068424261413
+      },
+      {
+        "rank": 29,
+        "feature_index": 2,
+        "feature": "proto",
+        "score": 0.24306213559730633
+      },
+      {
+        "rank": 30,
+        "feature_index": 39,
+        "feature": "ct_src_ltm",
+        "score": 0.2427713954486174
+      },
+      {
+        "rank": 31,
+        "feature_index": 24,
+        "feature": "sjit",
+        "score": 0.22829784367906417
+      },
+      {
+        "rank": 32,
+        "feature_index": 38,
+        "feature": "ct_dst_ltm",
+        "score": 0.22757032579012146
+      },
+      {
+        "rank": 33,
+        "feature_index": 29,
+        "feature": "synack",
+        "score": 0.20677152867836512
+      },
+      {
+        "rank": 34,
+        "feature_index": 28,
+        "feature": "tcprtt",
+        "score": 0.20672660014564914
+      },
+      {
+        "rank": 35,
+        "feature_index": 30,
+        "feature": "ackdat",
+        "score": 0.20660732727716133
+      },
+      {
+        "rank": 36,
+        "feature_index": 0,
+        "feature": "sport",
+        "score": 0.16450202420739268
+      },
+      {
+        "rank": 37,
+        "feature_index": 11,
+        "feature": "service",
+        "score": 0.11376417009033434
+      },
+      {
+        "rank": 38,
+        "feature_index": 23,
+        "feature": "res_bdy_len",
+        "score": 0.052270792718193834
+      },
+      {
+        "rank": 39,
+        "feature_index": 33,
+        "feature": "ct_flw_http_mthd",
+        "score": 0.03799857804200878
+      },
+      {
+        "rank": 40,
+        "feature_index": 22,
+        "feature": "trans_depth",
+        "score": 0.03799412237210626
+      },
+      {
+        "rank": 41,
+        "feature_index": 35,
+        "feature": "ct_ftp_cmd",
+        "score": 0.02633325445316679
+      },
+      {
+        "rank": 42,
+        "feature_index": 34,
+        "feature": "is_ftp_login",
+        "score": 0.026237696436254333
+      },
+      {
+        "rank": 43,
+        "feature_index": 31,
+        "feature": "is_sm_ips_ports",
+        "score": 0.013922121932098274
+      }
+    ],
+    "normalized_curve": [
+      {
+        "rank": 1,
+        "normalized_rank": 0.0,
+        "normalized_value": 1.0,
+        "distance_to_chord": 0.0
+      },
+      {
+        "rank": 2,
+        "normalized_rank": 0.023809523809523808,
+        "normalized_value": 0.8087332896929917,
+        "distance_to_chord": 0.11841011213079161
+      },
+      {
+        "rank": 3,
+        "normalized_rank": 0.047619047619047616,
+        "normalized_value": 0.5584328680620999,
+        "distance_to_chord": 0.2785633618573104
+      },
+      {
+        "rank": 4,
+        "normalized_rank": 0.07142857142857142,
+        "normalized_value": 0.5233511123547439,
+        "distance_to_chord": 0.2865340334713749
+      },
+      {
+        "rank": 5,
+        "normalized_rank": 0.09523809523809523,
+        "normalized_value": 0.5186510726004209,
+        "distance_to_chord": 0.27302158771096613
+      },
+      {
+        "rank": 6,
+        "normalized_rank": 0.11904761904761904,
+        "normalized_value": 0.4759965888681298,
+        "distance_to_chord": 0.2863469866635436
+      },
+      {
+        "rank": 7,
+        "normalized_rank": 0.14285714285714285,
+        "normalized_value": 0.4742238882657005,
+        "distance_to_chord": 0.270764599537998
+      },
+      {
+        "rank": 8,
+        "normalized_rank": 0.16666666666666666,
+        "normalized_value": 0.4719743300649163,
+        "distance_to_chord": 0.25551940165390946
+      },
+      {
+        "rank": 9,
+        "normalized_rank": 0.19047619047619047,
+        "normalized_value": 0.45985984740133035,
+        "distance_to_chord": 0.2472497587533611
+      },
+      {
+        "rank": 10,
+        "normalized_rank": 0.21428571428571427,
+        "normalized_value": 0.4563125467502123,
+        "distance_to_chord": 0.2329222033561373
+      },
+      {
+        "rank": 11,
+        "normalized_rank": 0.23809523809523808,
+        "normalized_value": 0.4511973636324614,
+        "distance_to_chord": 0.2197033082831731
+      },
+      {
+        "rank": 12,
+        "normalized_rank": 0.26190476190476186,
+        "normalized_value": 0.41750350740955716,
+        "distance_to_chord": 0.22669258676017634
+      },
+      {
+        "rank": 13,
+        "normalized_rank": 0.2857142857142857,
+        "normalized_value": 0.3655432163106373,
+        "distance_to_chord": 0.2465981852061127
+      },
+      {
+        "rank": 14,
+        "normalized_rank": 0.30952380952380953,
+        "normalized_value": 0.35701754813605496,
+        "distance_to_chord": 0.23579086724396944
+      },
+      {
+        "rank": 15,
+        "normalized_rank": 0.3333333333333333,
+        "normalized_value": 0.34626271739840536,
+        "distance_to_chord": 0.22655980524653807
+      },
+      {
+        "rank": 16,
+        "normalized_rank": 0.3571428571428571,
+        "normalized_value": 0.34251190119426017,
+        "distance_to_chord": 0.21237615707693677
+      },
+      {
+        "rank": 17,
+        "normalized_rank": 0.38095238095238093,
+        "normalized_value": 0.34121124065302133,
+        "distance_to_chord": 0.19645998722313163
+      },
+      {
+        "rank": 18,
+        "normalized_rank": 0.40476190476190477,
+        "normalized_value": 0.33653421028164104,
+        "distance_to_chord": 0.18293127137201318
+      },
+      {
+        "rank": 19,
+        "normalized_rank": 0.42857142857142855,
+        "normalized_value": 0.3355081190529677,
+        "distance_to_chord": 0.16682095169538738
+      },
+      {
+        "rank": 20,
+        "normalized_rank": 0.45238095238095233,
+        "normalized_value": 0.3261319743902901,
+        "distance_to_chord": 0.15661501142521583
+      },
+      {
+        "rank": 21,
+        "normalized_rank": 0.47619047619047616,
+        "normalized_value": 0.3242461361630804,
+        "distance_to_chord": 0.14111262468135982
+      },
+      {
+        "rank": 22,
+        "normalized_rank": 0.5,
+        "normalized_value": 0.3184977659744429,
+        "distance_to_chord": 0.12834146047997913
+      },
+      {
+        "rank": 23,
+        "normalized_rank": 0.5238095238095237,
+        "normalized_value": 0.3160230950613869,
+        "distance_to_chord": 0.11325544132126933
+      },
+      {
+        "rank": 24,
+        "normalized_rank": 0.5476190476190476,
+        "normalized_value": 0.30005892786790883,
+        "distance_to_chord": 0.10770793645723661
+      },
+      {
+        "rank": 25,
+        "normalized_rank": 0.5714285714285714,
+        "normalized_value": 0.2998542221346558,
+        "distance_to_chord": 0.09101680952683074
+      },
+      {
+        "rank": 26,
+        "normalized_rank": 0.5952380952380952,
+        "normalized_value": 0.2986645760494838,
+        "distance_to_chord": 0.07502214059833104
+      },
+      {
+        "rank": 27,
+        "normalized_rank": 0.6190476190476191,
+        "normalized_value": 0.29718591684637685,
+        "distance_to_chord": 0.05923183480537501
+      },
+      {
+        "rank": 28,
+        "normalized_rank": 0.6428571428571428,
+        "normalized_value": 0.2867705275431897,
+        "distance_to_chord": 0.04976075146781964
+      },
+      {
+        "rank": 29,
+        "normalized_rank": 0.6666666666666666,
+        "normalized_value": 0.27704399534318136,
+        "distance_to_chord": 0.03980257260133803
+      },
+      {
+        "rank": 30,
+        "normalized_rank": 0.6904761904761905,
+        "normalized_value": 0.2766924730965381,
+        "distance_to_chord": 0.023215260623140544
+      },
+      {
+        "rank": 31,
+        "normalized_rank": 0.7142857142857142,
+        "normalized_value": 0.25919308246238176,
+        "distance_to_chord": 0.018753322664648027
+      },
+      {
+        "rank": 32,
+        "normalized_rank": 0.738095238095238,
+        "normalized_value": 0.2583134697774894,
+        "distance_to_chord": 0.0025394270164163205
+      },
+      {
+        "rank": 33,
+        "normalized_rank": 0.7619047619047619,
+        "normalized_value": 0.23316647882639258,
+        "distance_to_chord": 0.003485159101836786
+      },
+      {
+        "rank": 34,
+        "normalized_rank": 0.7857142857142857,
+        "normalized_value": 0.23311215754042663,
+        "distance_to_chord": 0.013312305691030866
+      },
+      {
+        "rank": 35,
+        "normalized_rank": 0.8095238095238095,
+        "normalized_value": 0.23296794950144928,
+        "distance_to_chord": 0.030046210951305188
+      },
+      {
+        "rank": 36,
+        "normalized_rank": 0.8333333333333333,
+        "normalized_value": 0.1820601172071397,
+        "distance_to_chord": 0.010884813263028125
+      },
+      {
+        "rank": 37,
+        "normalized_rank": 0.8571428571428571,
+        "normalized_value": 0.12071501385793951,
+        "distance_to_chord": 0.015656849565244043
+      },
+      {
+        "rank": 38,
+        "normalized_rank": 0.8809523809523809,
+        "normalized_value": 0.04636583895034222,
+        "distance_to_chord": 0.051393779575493924
+      },
+      {
+        "rank": 39,
+        "normalized_rank": 0.9047619047619047,
+        "normalized_value": 0.0291098769163037,
+        "distance_to_chord": 0.04675971160312334
+      },
+      {
+        "rank": 40,
+        "normalized_rank": 0.9285714285714285,
+        "normalized_value": 0.02910448974462653,
+        "distance_to_chord": 0.029927645166210836
+      },
+      {
+        "rank": 41,
+        "normalized_rank": 0.9523809523809523,
+        "normalized_value": 0.015005802283813834,
+        "distance_to_chord": 0.023061046933044355
+      },
+      {
+        "rank": 42,
+        "normalized_rank": 0.9761904761904762,
+        "normalized_value": 0.014890266920220906,
+        "distance_to_chord": 0.006306867029570948
+      },
+      {
+        "rank": 43,
+        "normalized_rank": 1.0,
+        "normalized_value": 0.0,
+        "distance_to_chord": 0.0
+      }
+    ],
+    "selected_k": 4,
+    "selected_indices_rank_order": [
+      32,
+      7,
+      41,
+      3
+    ],
+    "selected_features_rank_order": [
+      "ct_state_ttl",
+      "sttl",
+      "ct_dst_sport_ltm",
+      "state"
+    ],
+    "score_method": "existing_E3_absolute_feature_target_spearman",
+    "coefficients": [
+      0.16450202420739268,
+      0.29226583209705914,
+      -0.24306213559730633,
+      -0.44678001833992004,
+      0.30031217235762353,
+      0.38710245359884143,
+      0.3942670977800463,
+      -0.6828164497886134,
+      0.4076136175471832,
+      0.2836622582446814,
+      0.29141716343030566,
+      -0.11376417009033434,
+      -0.282102502377683,
+      0.44289266762438295,
+      0.3092073734939606,
+      0.39133316478263586,
+      0.29720991390510276,
+      0.2961341520073432,
+      0.26192822100814683,
+      0.26209753084811227,
+      0.2597212953194604,
+      0.40428685193368685,
+      0.03799412237210626,
+      0.052270792718193834,
+      0.22829784367906417,
+      0.260944277934862,
+      0.2511068424261413,
+      0.3162588590156334,
+      0.20672660014564914,
+      0.20677152867836512,
+      0.20660732727716133,
+      0.013922121932098274,
+      -0.8410110230337684,
+      0.03799857804200878,
+      0.026237696436254333,
+      0.02633325445316679,
+      -0.2773480891952372,
+      -0.27530131634916943,
+      -0.22757032579012146,
+      -0.2427713954486174,
+      -0.4061474365539377,
+      -0.47579574911663447,
+      -0.3592346390815619
+    ],
+    "absolute_coefficients": [
+      0.16450202420739268,
+      0.29226583209705914,
+      0.24306213559730633,
+      0.44678001833992004,
+      0.30031217235762353,
+      0.38710245359884143,
+      0.3942670977800463,
+      0.6828164497886134,
+      0.4076136175471832,
+      0.2836622582446814,
+      0.29141716343030566,
+      0.11376417009033434,
+      0.282102502377683,
+      0.44289266762438295,
+      0.3092073734939606,
+      0.39133316478263586,
+      0.29720991390510276,
+      0.2961341520073432,
+      0.26192822100814683,
+      0.26209753084811227,
+      0.2597212953194604,
+      0.40428685193368685,
+      0.03799412237210626,
+      0.052270792718193834,
+      0.22829784367906417,
+      0.260944277934862,
+      0.2511068424261413,
+      0.3162588590156334,
+      0.20672660014564914,
+      0.20677152867836512,
+      0.20660732727716133,
+      0.013922121932098274,
+      0.8410110230337684,
+      0.03799857804200878,
+      0.026237696436254333,
+      0.02633325445316679,
+      0.2773480891952372,
+      0.27530131634916943,
+      0.22757032579012146,
+      0.2427713954486174,
+      0.4061474365539377,
+      0.47579574911663447,
+      0.3592346390815619
+    ],
+    "historical_selected_k": 4,
+    "historical_result_reproduced": true
+  }
+}

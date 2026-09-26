@@ -1,0 +1,66 @@
+{
+  "balancing_audit": {
+    "class_counts_after": {
+      "0": 15006,
+      "1": 15007,
+      "2": 15014,
+      "3": 15000,
+      "4": 15000,
+      "5": 15000,
+      "6": 15000,
+      "7": 15007,
+      "8": 15002,
+      "9": 15001
+    },
+    "class_counts_before": {
+      "0": 1714,
+      "1": 1148,
+      "2": 10466,
+      "3": 15000,
+      "4": 15000,
+      "5": 15000,
+      "6": 15000,
+      "7": 8951,
+      "8": 967,
+      "9": 112
+    },
+    "effective_minibatch_kmeans_nonempty_clusters": 20,
+    "failure_reason": null,
+    "fallback_method": null,
+    "fallback_parameters": null,
+    "fallback_used": false,
+    "fold": 3,
+    "phase": "cross_validation",
+    "primary_method_attempted": "KMeansSMOTE",
+    "primary_parameters": {
+      "cluster_balance_threshold": 0.0,
+      "k_neighbors": 3,
+      "n_clusters": 20,
+      "n_jobs": 1,
+      "random_state": 42
+    },
+    "stage": "fold"
+  },
+  "balancing_seconds": 7.133260700036772,
+  "checkpoint_schema_version": 1,
+  "config_fingerprint": "4f3b76375982b852b922afc67fff8ccd6f31781a1ce9a01819304e76cf619582",
+  "experiment": "E2_parallel_mi_pca",
+  "feature_dimensions": {
+    "concatenated_dimension": 15,
+    "final_dimension": 15,
+    "mi_branch_dimension": 10,
+    "pca_branch_dimension": 5,
+    "prepared_dimension": 43
+  },
+  "fold_number": 3,
+  "model": "LogReg",
+  "random_state": 42,
+  "split": {
+    "method": "stratified_80_20",
+    "random_state": 42
+  },
+  "training_seconds": 29.30076969997026,
+  "validation_metrics": {
+    "accuracy": 0.9579977707076895
+  }
+}

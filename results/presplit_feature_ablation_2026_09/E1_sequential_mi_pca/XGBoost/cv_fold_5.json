@@ -41,7 +41,7 @@
     },
     "stage": "fold"
   },
-  "balancing_seconds": 7.5546683967113495,
+  "balancing_seconds": 4.267975499969907,
   "checkpoint_schema_version": 1,
   "config_fingerprint": "a3f0ce268691f7d16ec32524a0818822efc36412974cb7791ef0e24ecb38f038",
   "experiment": "E1_sequential_mi_pca",
@@ -58,8 +58,8 @@
     "method": "stratified_80_20",
     "random_state": 42
   },
-  "training_seconds": 1.2954914718866348,
+  "training_seconds": 1.7074590999400243,
   "validation_metrics": {
-    "accuracy": 0.9393637412741415
+    "accuracy": 0.9187735447470147
   }
 }

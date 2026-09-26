@@ -1,0 +1,53 @@
+{
+  "protocol": "presplit_feature_ablation",
+  "result_warning": "Presplit feature-ablation protocol; not a leakage-free holdout estimate.",
+  "experiment": "E5_pca_only",
+  "model": "XGBoost",
+  "random_state": 42,
+  "calibration": {
+    "source": "configs\\presplit_feature_calibration.json",
+    "manifest_sha256": "d7ba4e67dad3f168806aee2b2e8b6212237d1992b1a3e3342bab8e1851d9bf53",
+    "protocol": "presplit_feature_parameter_calibration_v1",
+    "dataset_fingerprint": "9f087eb5196e0a0b631747e0bd287455a06064ab522b4fd5f23c15af86349641",
+    "prepared_dimension": 43,
+    "mi_k": 10,
+    "pca_parameterization": "component_count",
+    "pca_components": 5,
+    "spearman_selection_rule": "top_k",
+    "spearman_calibration_method": "maximum_distance_to_endpoint_chord_normalized",
+    "spearman_k": 4
+  },
+  "n_splits": 5,
+  "k_neighbors": 3,
+  "rus_cap": 15000,
+  "spearman_selection_rule": "top_k",
+  "spearman_selection_value": 4,
+  "split_method": "stratified_80_20",
+  "test_size": 0.2,
+  "balancer": "KMeansSMOTE",
+  "balancer_n_clusters": 20,
+  "cluster_balance_threshold": 0.0,
+  "balancer_n_jobs": 1,
+  "feature_dimensions": {
+    "prepared_dimension": 43,
+    "pca_dimension": 5,
+    "final_dimension": 5
+  },
+  "selected_features": null,
+  "model_hyperparameters": {
+    "n_estimators": 30,
+    "subsample": 0.1,
+    "max_depth": 3,
+    "min_child_weight": 20,
+    "gamma": 0.2,
+    "learning_rate": 0.05,
+    "colsample_bytree": 0.1,
+    "reg_alpha": 0.5,
+    "use_label_encoder": false,
+    "eval_metric": "mlogloss",
+    "tree_method": "hist",
+    "random_state": 42,
+    "verbosity": 0
+  },
+  "cv_checkpoint_fingerprint": "6e543ef4098acf7d7c404092ca62bff617cfd61ced8f65bc993ff56cbf260c8b"
+}
