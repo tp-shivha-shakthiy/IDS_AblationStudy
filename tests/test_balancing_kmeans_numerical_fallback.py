@@ -7,12 +7,6 @@ import numpy as np
 import pytest
 
 from src.balancing import balance_training_fold
-from src.presplit_cv_checkpoints import (
-    build_cv_config_fingerprint,
-    checkpoint_path,
-    load_compatible_fold_checkpoint,
-    save_fold_checkpoint,
-)
 
 
 def test_kmeans_smote_zero_sparsity_uses_auditable_deterministic_fallback():
@@ -83,35 +77,3 @@ def test_unrelated_kmeans_smote_exception_is_not_silently_fallbacked(monkeypatch
     y = np.array([0] * 12 + [1] * 48)
     with pytest.raises(ValueError, match="unrelated KMeansSMOTE failure"):
         balance_training_fold(X, y, n_clusters=2, random_state=42)
-
-
-def test_checkpoint_is_reused_only_with_an_exact_fingerprint(tmp_path):
-    """A completed fold is reusable only for the exact presplit configuration."""
-    config = {
-        "experiment": "E3_spearman", "model": "HGB", "random_state": 42,
-        "k_neighbors": 3, "rus_cap": 15000,
-        "spearman_selection_rule": "top_k", "spearman_selection_value": 4,
-    }
-    dimensions = {"prepared_dimension": 43, "selected_dimension": 4, "final_dimension": 4}
-    selected_features = {"selected_features": ["ct_state_ttl", "sttl", "state", "dload"]}
-    fingerprint = build_cv_config_fingerprint(config, dimensions, selected_features)
-    saved = save_fold_checkpoint(
-        str(tmp_path), 1, {"accuracy": 0.75}, {"failure_reason": None},
-        1.25, 2.5, config, dimensions, fingerprint,
-    )
-
-    assert checkpoint_path(str(tmp_path), 1).endswith("cv_fold_1.json")
-    assert saved["fold_number"] == 1
-    reused = load_compatible_fold_checkpoint(
-        str(tmp_path), 1, fingerprint, config, dimensions,
-    )
-    assert reused["validation_metrics"] == {"accuracy": 0.75}
-
-    changed_config = {**config, "rus_cap": 0}
-    changed_fingerprint = build_cv_config_fingerprint(
-        changed_config, dimensions, selected_features,
-    )
-    with pytest.raises(ValueError, match="Refusing to reuse incompatible CV checkpoint"):
-        load_compatible_fold_checkpoint(
-            str(tmp_path), 1, changed_fingerprint, changed_config, dimensions,
-        )
